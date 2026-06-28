@@ -25,7 +25,7 @@ that can be opened later as a replace/import flow.
 
 Returns service health.
 
-### `POST /v1/json`
+### `POST /api/v1/post/`
 
 Stores an encrypted snapshot.
 
@@ -34,7 +34,7 @@ Write requests are CORS-limited to `TABULA_JSON_ALLOWED_ORIGINS`.
 Request:
 
 ```http
-POST /v1/json
+POST /api/v1/post/
 Content-Type: application/octet-stream
 
 <opaque encrypted bytes>
@@ -44,12 +44,13 @@ Response:
 
 ```json
 {
-  "jsonId": "generated-id",
+  "id": "generated-id",
+  "data": "https://json.tabula.md/api/v1/generated-id",
   "createdAt": "2026-06-28T00:00:00.000Z"
 }
 ```
 
-### `GET /v1/json/:jsonId`
+### `GET /api/v1/:id`
 
 Returns the stored encrypted snapshot bytes.
 
@@ -70,7 +71,12 @@ npm install
 npm run dev
 ```
 
-The service listens on `http://localhost:3004` by default.
+The Node development server listens on `http://localhost:3004` by default.
+To run the Cloudflare Worker locally:
+
+```sh
+npm run dev:worker
+```
 
 Use Tabula.md with:
 
@@ -78,45 +84,66 @@ Use Tabula.md with:
 VITE_TABULA_JSON_URL=http://localhost:3004 npm run dev
 ```
 
-## Production Environment
+## Production: Cloudflare Worker + R2
 
-```env
-PORT=3004
-TABULA_JSON_ALLOWED_ORIGINS=https://tabula.md
-TABULA_JSON_STORAGE_DRIVER=r2
-TABULA_JSON_R2_ACCOUNT_ID=<cloudflare-account-id>
-TABULA_JSON_R2_BUCKET=tabula-json
-TABULA_JSON_R2_ACCESS_KEY_ID=<r2-access-key-id>
-TABULA_JSON_R2_SECRET_ACCESS_KEY=<r2-secret-access-key>
-TABULA_JSON_R2_PREFIX=json/
-TABULA_JSON_DATA_DIR=/data
-TABULA_JSON_MAX_PAYLOAD_BYTES=2097152
-TABULA_JSON_RATE_LIMIT_PER_MINUTE=120
+Production should run as a Cloudflare Worker with an R2 bucket binding. The
+Worker uses the `SNAPSHOTS` R2 binding directly, so no R2 access key or S3
+compatibility secret is needed in production.
+
+`wrangler.jsonc` defines:
+
+- Worker name: `tabula-json`
+- R2 binding: `SNAPSHOTS`
+- Bucket name: `tabula-json`
+- Allowed origins: `https://tabula.md,https://www.tabula.md`
+- Max payload: `2097152` bytes
+
+Deploy:
+
+```sh
+npm run deploy:dry-run
+npm run deploy
+npm run smoke:production
 ```
 
-Storage drivers:
-
-- `file`: local development and simple self-hosting. Stores records under
-  `TABULA_JSON_DATA_DIR`.
-- `r2`: production storage through Cloudflare R2's S3-compatible API.
-
-For production, deploy this service behind `https://json.tabula.md`.
+Attach `json.tabula.md` as a Worker custom domain in Cloudflare.
 
 ## Retention and Abuse Controls
 
 Share links are intended to be durable. Production buckets should not expire
 objects unless the product explicitly changes the share-link contract.
 
-`TABULA_JSON_RATE_LIMIT_PER_MINUTE` is a best-effort per-process limit. Use
-Cloudflare DNS proxy, WAF, and rate limiting in front of `json.tabula.md` for
-real abuse protection.
+Use Cloudflare WAF and rate limiting in front of `json.tabula.md` for abuse
+protection. Do not implement product policy in this opaque store.
+
+## Node Self-hosting
+
+The Node/Express server remains available for local development and simple
+self-hosting:
+
+```env
+PORT=3004
+TABULA_JSON_ALLOWED_ORIGINS=https://tabula.md
+TABULA_JSON_STORAGE_DRIVER=file
+TABULA_JSON_DATA_DIR=/data
+TABULA_JSON_MAX_PAYLOAD_BYTES=2097152
+```
+
+For Node production, `TABULA_JSON_STORAGE_DRIVER` is required. Supported
+drivers:
+
+- `file`: stores records under `TABULA_JSON_DATA_DIR`.
+- `r2`: uses Cloudflare R2's S3-compatible API for hosts that are not running
+  on Cloudflare Workers.
 
 ## Deployment Checklist
 
 1. Create a Cloudflare R2 bucket, for example `tabula-json`.
-2. Create an R2 access key with read/write access to that bucket.
-3. Deploy this service with `TABULA_JSON_STORAGE_DRIVER=r2`.
-4. Set `TABULA_JSON_ALLOWED_ORIGINS=https://tabula.md`.
-5. Point `json.tabula.md` at the service.
-6. Set `VITE_TABULA_JSON_URL=https://json.tabula.md` on the Tabula.md web app.
-7. Run `curl -fsS https://json.tabula.md/health`.
+2. Run `npm run typegen` after changing `wrangler.jsonc`.
+3. Run `npm run deploy:dry-run`.
+4. Deploy this Worker with `npm run deploy`.
+5. Attach `json.tabula.md` to the Worker.
+6. Run `npm run smoke:production`.
+7. Set `VITE_TABULA_JSON_URL=https://json.tabula.md` on the Tabula.md web app.
+8. Redeploy Tabula.md.
+9. Run a share-link round trip against `https://tabula.md`.

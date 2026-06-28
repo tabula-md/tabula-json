@@ -20,10 +20,12 @@ Tabula.md. It stores ciphertext for `#json=<id>,<key>` links.
 - Dev: `npm run dev`
 - Test: `npm test`
 - Build: `npm run build`
+- Production smoke: `npm run smoke:production`
 
 ## Repository Map
 
-- `src/server.ts`: Express HTTP service and routes.
+- `src/worker.ts`: Cloudflare Worker service and R2 binding routes.
+- `src/server.ts`: Node/Express service for local development and self-hosting.
 - `src/protocol.ts`: encrypted JSON payload and ID validation.
 - `src/storage/file-store.ts`: local encrypted record persistence.
 - `test`: protocol and server tests.
