@@ -1,6 +1,6 @@
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Readable } from "node:stream";
-import { validateJsonShareId } from "../protocol.js";
+import { jsonShareCacheControl, jsonShareContentType, validateJsonShareId } from "../protocol.js";
 import type { JsonShareStore } from "./store.js";
 
 type R2Client = {
@@ -57,13 +57,13 @@ export class R2JsonShareStore implements JsonShareStore {
   async writeJsonShare(jsonIdInput: string, snapshot: Buffer) {
     const jsonId = validateJsonShareId(jsonIdInput);
     await this.client.send(
-      new PutObjectCommand({
-        Bucket: this.options.bucket,
-        CacheControl: "public, max-age=31536000, immutable",
-        ContentType: "application/octet-stream",
-        Key: this.getObjectKey(jsonId),
-        Body: snapshot,
-      }),
+        new PutObjectCommand({
+          Bucket: this.options.bucket,
+          CacheControl: jsonShareCacheControl,
+          ContentType: jsonShareContentType,
+          Key: this.getObjectKey(jsonId),
+          Body: snapshot,
+        }),
     );
   }
 
@@ -89,7 +89,7 @@ function normalizeObjectPrefix(prefix: string) {
 
 async function bodyToBuffer(body: unknown) {
   if (!body) {
-    return Buffer.alloc(0);
+    throw new Error("R2 object body is missing.");
   }
 
   const transformable = body as { transformToByteArray?: () => Promise<Uint8Array> };

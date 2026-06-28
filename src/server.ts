@@ -4,10 +4,16 @@ import http from "node:http";
 import path from "node:path";
 import express, { type RequestHandler } from "express";
 import {
+  defaultMaxPayloadBytes,
+  jsonShareApiPrefix,
+  jsonShareCacheControl,
+  jsonShareContentType,
+  jsonSharePostPath,
   ProtocolError,
   validateJsonShareId,
   validateJsonShareBlob,
 } from "./protocol.js";
+import { servicePageHtml } from "./service-page.js";
 import { FileJsonShareStore } from "./storage/file-store.js";
 import { R2JsonShareStore } from "./storage/r2-store.js";
 import type { JsonShareStore } from "./storage/store.js";
@@ -17,16 +23,9 @@ type ServerOptions = {
   dataDir?: string;
   maxPayloadBytes?: number;
   port?: number;
-  rateLimitPerMinute?: number;
-};
-
-type RateLimiter = {
-  assertAllowed: (key: string) => void;
 };
 
 const defaultPort = 3004;
-const defaultMaxPayloadBytes = 2 * 1024 * 1024;
-const defaultRateLimitPerMinute = 120;
 const serviceVersion = readPackageVersion();
 
 export function createTabulaJsonServer(options: ServerOptions = {}) {
@@ -35,43 +34,14 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
   const allowedOrigins = options.allowedOrigins ?? parseAllowedOrigins(process.env.TABULA_JSON_ALLOWED_ORIGINS);
   const maxPayloadBytes =
     options.maxPayloadBytes ?? numberFromEnv("TABULA_JSON_MAX_PAYLOAD_BYTES", defaultMaxPayloadBytes);
-  const rateLimitPerMinute =
-    options.rateLimitPerMinute ?? numberFromEnv("TABULA_JSON_RATE_LIMIT_PER_MINUTE", defaultRateLimitPerMinute);
 
   const store = createJsonShareStore({ dataDir });
   const app = express();
   const server = http.createServer(app);
-  const rateLimiter = createRateLimiter({ limit: rateLimitPerMinute });
+  app.enable("strict routing");
 
   app.get("/", applyOpenCors(), (_request, response) => {
-    response
-      .status(200)
-      .type("html")
-      .send(`<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Tabula JSON Store</title>
-    <style>
-      :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; color: CanvasText; }
-      main { width: min(560px, calc(100vw - 48px)); }
-      h1 { font-size: 28px; margin: 0 0 12px; }
-      p { color: color-mix(in srgb, CanvasText 68%, transparent); font-size: 16px; line-height: 1.55; margin: 0; }
-      a { color: inherit; text-underline-offset: 4px; }
-      code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    </style>
-  </head>
-  <body>
-    <main>
-      <h1>Tabula JSON Store</h1>
-      <p>Encrypted snapshot storage for <code>Tabula.md</code> share links.</p>
-      <p>The server cannot decrypt stored snapshots.</p>
-      <p><a href="https://github.com/tabula-md/tabula-json" rel="noreferrer">Read more on GitHub</a>.</p>
-    </main>
-  </body>
-</html>`);
+    response.status(200).type("html").send(servicePageHtml());
   });
 
   app.get("/health", applyOpenCors(), (_request, response) => {
@@ -82,16 +52,15 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
     });
   });
 
-  app.options("/v1/json", applyWriteCors(allowedOrigins));
+  app.options(jsonSharePostPath, applyWriteCors(allowedOrigins));
   app.post(
-    "/v1/json",
+    jsonSharePostPath,
     applyWriteCors(allowedOrigins),
     express.raw({ limit: `${maxPayloadBytes}b`, type: "*/*" }),
     async (request, response, next) => {
       try {
-        rateLimiter.assertAllowed(`json-share-write:${request.ip}`);
-        if (!request.is("application/octet-stream")) {
-          throw new ProtocolError(415, "JSON share payload must be application/octet-stream");
+        if (!request.is(jsonShareContentType)) {
+          throw new ProtocolError(415, `JSON share payload must be ${jsonShareContentType}`);
         }
         const snapshot = validateJsonShareBlob(request.body, { maxPayloadBytes });
         const jsonId = await generateUniqueJsonShareId(store);
@@ -100,7 +69,8 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
         await store.writeJsonShare(jsonId, snapshot);
 
         response.status(201).json({
-          jsonId,
+          id: jsonId,
+          data: `${getRequestOrigin(request)}${jsonShareApiPrefix}${jsonId}`,
           createdAt: timestamp,
         });
       } catch (error) {
@@ -109,7 +79,7 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
     },
   );
 
-  app.get("/v1/json/:jsonId", applyOpenCors(), async (request, response, next) => {
+  app.get(`${jsonShareApiPrefix}:jsonId`, applyOpenCors(), async (request, response, next) => {
     try {
       const jsonId = validateJsonShareId(request.params.jsonId);
       const snapshot = await store.getJsonShare(jsonId);
@@ -117,7 +87,12 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
         response.status(404).json({ error: "JSON share not found" });
         return;
       }
-      response.status(200).type("application/octet-stream").send(snapshot);
+      response
+        .status(200)
+        .setHeader("Cache-Control", jsonShareCacheControl)
+        .setHeader("X-Content-Type-Options", "nosniff")
+        .type(jsonShareContentType)
+        .send(snapshot);
     } catch (error) {
       next(error);
     }
@@ -125,10 +100,6 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
 
   app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
     if (error instanceof ProtocolError) {
-      response.status(error.statusCode).json({ error: error.message });
-      return;
-    }
-    if (error instanceof RateLimitError) {
       response.status(error.statusCode).json({ error: error.message });
       return;
     }
@@ -162,9 +133,11 @@ async function generateUniqueJsonShareId(store: JsonShareStore) {
 }
 
 function createJsonShareStore({ dataDir }: { dataDir: string }): JsonShareStore {
-  const storageDriver = (process.env.TABULA_JSON_STORAGE_DRIVER ?? process.env.TABULA_JSON_STORAGE ?? "file")
-    .trim()
-    .toLowerCase();
+  const configuredDriver = process.env.TABULA_JSON_STORAGE_DRIVER?.trim().toLowerCase();
+  if (!configuredDriver && process.env.NODE_ENV === "production") {
+    throw new Error("TABULA_JSON_STORAGE_DRIVER is required in production.");
+  }
+  const storageDriver = configuredDriver || "file";
 
   if (storageDriver === "file") {
     return new FileJsonShareStore(dataDir);
@@ -182,6 +155,11 @@ function createJsonShareStore({ dataDir }: { dataDir: string }): JsonShareStore 
   }
 
   throw new Error(`Unsupported TABULA_JSON_STORAGE_DRIVER: ${storageDriver}`);
+}
+
+function getRequestOrigin(request: express.Request) {
+  const protocol = request.get("x-forwarded-proto")?.split(",")[0]?.trim() || request.protocol;
+  return `${protocol}://${request.get("host")}`;
 }
 
 function applyOpenCors(): RequestHandler {
@@ -231,36 +209,6 @@ function parseAllowedOrigins(value: string | undefined) {
     .split(",")
     .map((origin) => origin.trim())
     .filter(Boolean);
-}
-
-class RateLimitError extends Error {
-  readonly statusCode = 429;
-
-  constructor() {
-    super("Too many requests");
-    this.name = "RateLimitError";
-  }
-}
-
-function createRateLimiter({ limit }: { limit: number }): RateLimiter {
-  const buckets = new Map<string, { count: number; resetAt: number }>();
-  return {
-    assertAllowed(key) {
-      if (limit <= 0) {
-        return;
-      }
-      const now = Date.now();
-      const bucket = buckets.get(key);
-      if (!bucket || bucket.resetAt <= now) {
-        buckets.set(key, { count: 1, resetAt: now + 60_000 });
-        return;
-      }
-      if (bucket.count >= limit) {
-        throw new RateLimitError();
-      }
-      bucket.count += 1;
-    },
-  };
 }
 
 function numberFromEnv(name: string, fallback: number) {

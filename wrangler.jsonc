@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "tabula-json",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-06-29",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "vars": {
+    "TABULA_JSON_ALLOWED_ORIGINS": "https://tabula.md,https://www.tabula.md",
+    "TABULA_JSON_MAX_PAYLOAD_BYTES": "2097152",
+    "TABULA_JSON_R2_PREFIX": "json/",
+    "TABULA_JSON_VERSION": "0.1.0"
+  },
+  "r2_buckets": [
+    {
+      "binding": "SNAPSHOTS",
+      "bucket_name": "tabula-json"
+    }
+  ]
+}
