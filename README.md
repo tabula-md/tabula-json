@@ -2,6 +2,9 @@
 
 Encrypted snapshot storage for Tabula.md share links.
 
+Service page: [json.tabula.md](https://json.tabula.md).
+Source: [tabula-md/tabula-json](https://github.com/tabula-md/tabula-json).
+
 This service backs Excalidraw-style snapshot links:
 
 ```text

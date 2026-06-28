@@ -59,6 +59,7 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
       main { width: min(560px, calc(100vw - 48px)); }
       h1 { font-size: 28px; margin: 0 0 12px; }
       p { color: color-mix(in srgb, CanvasText 68%, transparent); font-size: 16px; line-height: 1.55; margin: 0; }
+      a { color: inherit; text-underline-offset: 4px; }
       code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     </style>
   </head>
@@ -67,6 +68,7 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
       <h1>Tabula JSON Store</h1>
       <p>Encrypted snapshot storage for <code>Tabula.md</code> share links.</p>
       <p>The server cannot decrypt stored snapshots.</p>
+      <p><a href="https://github.com/tabula-md/tabula-json" rel="noreferrer">Read more on GitHub</a>.</p>
     </main>
   </body>
 </html>`);
