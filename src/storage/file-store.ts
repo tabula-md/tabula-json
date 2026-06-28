@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { type PublicJsonShareSnapshot, validateJsonShareId } from "../protocol.js";
+import { validateJsonShareId } from "../protocol.js";
+import type { JsonShareStore } from "./store.js";
 
-export class FileJsonShareStore {
+export class FileJsonShareStore implements JsonShareStore {
   constructor(private readonly dataDir: string) {}
 
-  async getJsonShare(jsonIdInput: string): Promise<PublicJsonShareSnapshot | null> {
+  async getJsonShare(jsonIdInput: string): Promise<Buffer | null> {
     const jsonId = validateJsonShareId(jsonIdInput);
     try {
-      return JSON.parse(await fs.readFile(this.jsonSharePath(jsonId), "utf8")) as PublicJsonShareSnapshot;
+      return await fs.readFile(this.jsonSharePath(jsonId));
     } catch (error) {
       if (isNotFound(error)) {
         return null;
@@ -18,11 +19,11 @@ export class FileJsonShareStore {
     }
   }
 
-  async writeJsonShare(snapshot: PublicJsonShareSnapshot) {
-    const jsonId = validateJsonShareId(snapshot.jsonId);
+  async writeJsonShare(jsonIdInput: string, snapshot: Buffer) {
+    const jsonId = validateJsonShareId(jsonIdInput);
     const jsonShareDir = this.jsonShareDir(jsonId);
     await fs.mkdir(jsonShareDir, { recursive: true });
-    await writeFileAtomically(this.jsonSharePath(jsonId), `${JSON.stringify(snapshot, null, 2)}\n`);
+    await writeFileAtomically(this.jsonSharePath(jsonId), snapshot);
   }
 
   private jsonShareDir(jsonId: string) {
@@ -35,11 +36,11 @@ export class FileJsonShareStore {
   }
 
   private jsonSharePath(jsonId: string) {
-    return path.join(this.jsonShareDir(jsonId), "json.json");
+    return path.join(this.jsonShareDir(jsonId), "snapshot.bin");
   }
 }
 
-async function writeFileAtomically(filePath: string, data: string) {
+async function writeFileAtomically(filePath: string, data: Buffer) {
   const directory = path.dirname(filePath);
   const temporaryPath = path.join(directory, `.json-share.${process.pid}.${randomUUID()}.tmp`);
 

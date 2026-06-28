@@ -16,22 +16,37 @@ afterEach(async () => {
 });
 
 describe("Tabula JSON server", () => {
+  const encryptedBlob = Buffer.from("opaque encrypted snapshot", "utf8");
+
+  it("serves a minimal public service page", async () => {
+    const server = createTabulaJsonServer({ dataDir: temporaryDirectory, allowedOrigins: ["https://tabula.md"] });
+    await request(server.app)
+      .get("/")
+      .expect(200)
+      .expect("access-control-allow-origin", "*")
+      .expect((response) => {
+        expect(response.text).toContain("Tabula JSON Store");
+      });
+  });
+
   it("reports health", async () => {
     const server = createTabulaJsonServer({ dataDir: temporaryDirectory, allowedOrigins: ["https://tabula.md"] });
     await request(server.app)
       .get("/health")
       .expect(200)
+      .expect("access-control-allow-origin", "*")
       .expect((response) => {
         expect(response.body).toMatchObject({ ok: true, service: "tabula-json" });
       });
   });
 
-  it("stores and reads encrypted JSON share records", async () => {
+  it("stores and reads opaque encrypted snapshots", async () => {
     const server = createTabulaJsonServer({ dataDir: temporaryDirectory, allowedOrigins: ["https://tabula.md"] });
     const createResponse = await request(server.app)
       .post("/v1/json")
       .set("origin", "https://tabula.md")
-      .send({ encryptedData: "ciphertext_123", iv: "iv_123" })
+      .set("content-type", "application/octet-stream")
+      .send(encryptedBlob)
       .expect(201);
 
     expect(createResponse.body.jsonId).toMatch(/^[A-Za-z0-9_-]{8,80}$/);
@@ -40,27 +55,36 @@ describe("Tabula JSON server", () => {
     await request(server.app)
       .get(`/v1/json/${createResponse.body.jsonId}`)
       .set("origin", "https://tabula.md")
+      .buffer(true)
       .expect(200)
+      .expect("content-type", /application\/octet-stream/)
       .expect((response) => {
-        expect(response.body).toEqual({
-          v: 1,
-          jsonId: createResponse.body.jsonId,
-          createdAt: createResponse.body.createdAt,
-          encryptedData: "ciphertext_123",
-          iv: "iv_123",
-        });
+        expect(response.body).toEqual(encryptedBlob);
       });
   });
 
-  it("rejects plaintext fields", async () => {
+  it("rejects non-binary uploads", async () => {
     const server = createTabulaJsonServer({ dataDir: temporaryDirectory, allowedOrigins: ["https://tabula.md"] });
     await request(server.app)
       .post("/v1/json")
       .set("origin", "https://tabula.md")
-      .send({ encryptedData: "ciphertext_123", iv: "iv_123", markdown: "# Secret" })
+      .send({ markdown: "# Secret" })
+      .expect(415)
+      .expect((response) => {
+        expect(response.body.error).toBe("JSON share payload must be application/octet-stream");
+      });
+  });
+
+  it("rejects empty uploads", async () => {
+    const server = createTabulaJsonServer({ dataDir: temporaryDirectory, allowedOrigins: ["https://tabula.md"] });
+    await request(server.app)
+      .post("/v1/json")
+      .set("origin", "https://tabula.md")
+      .set("content-type", "application/octet-stream")
+      .send(Buffer.alloc(0))
       .expect(400)
       .expect((response) => {
-        expect(response.body.error).toBe("JSON share payload must not include markdown");
+        expect(response.body.error).toBe("JSON share payload is empty");
       });
   });
 
@@ -69,8 +93,25 @@ describe("Tabula JSON server", () => {
     await request(server.app)
       .post("/v1/json")
       .set("origin", "https://evil.example")
-      .send({ encryptedData: "ciphertext_123", iv: "iv_123" })
+      .set("content-type", "application/octet-stream")
+      .send(encryptedBlob)
       .expect(403);
+  });
+
+  it("allows public reads from any origin", async () => {
+    const server = createTabulaJsonServer({ dataDir: temporaryDirectory, allowedOrigins: ["https://tabula.md"] });
+    const createResponse = await request(server.app)
+      .post("/v1/json")
+      .set("origin", "https://tabula.md")
+      .set("content-type", "application/octet-stream")
+      .send(encryptedBlob)
+      .expect(201);
+
+    await request(server.app)
+      .get(`/v1/json/${createResponse.body.jsonId}`)
+      .set("origin", "https://reader.example")
+      .expect(200)
+      .expect("access-control-allow-origin", "*");
   });
 
   it("allows localhost origins when no allowlist is configured", async () => {
@@ -78,12 +119,30 @@ describe("Tabula JSON server", () => {
     await request(server.app)
       .post("/v1/json")
       .set("origin", "http://localhost:5173")
-      .send({ encryptedData: "ciphertext_123", iv: "iv_123" })
+      .set("content-type", "application/octet-stream")
+      .send(encryptedBlob)
       .expect(201);
   });
 
   it("returns 404 for missing records", async () => {
     const server = createTabulaJsonServer({ dataDir: temporaryDirectory, allowedOrigins: ["https://tabula.md"] });
     await request(server.app).get("/v1/json/missing123").set("origin", "https://tabula.md").expect(404);
+  });
+
+  it("fails fast when numeric environment variables are invalid", () => {
+    const originalValue = process.env.TABULA_JSON_MAX_PAYLOAD_BYTES;
+    process.env.TABULA_JSON_MAX_PAYLOAD_BYTES = "not-a-number";
+
+    try {
+      expect(() =>
+        createTabulaJsonServer({ dataDir: temporaryDirectory, allowedOrigins: ["https://tabula.md"] }),
+      ).toThrow("TABULA_JSON_MAX_PAYLOAD_BYTES must be a non-negative number.");
+    } finally {
+      if (originalValue === undefined) {
+        delete process.env.TABULA_JSON_MAX_PAYLOAD_BYTES;
+      } else {
+        process.env.TABULA_JSON_MAX_PAYLOAD_BYTES = originalValue;
+      }
+    }
   });
 });

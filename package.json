@@ -1,7 +1,7 @@
 {
   "name": "tabula-json",
   "version": "0.1.0",
-  "description": "Encrypted JSON share-link storage service for Tabula.md.",
+  "description": "Encrypted snapshot storage service for Tabula.md share links.",
   "license": "MIT",
   "type": "module",
   "main": "dist/src/server.js",
@@ -17,6 +17,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1075.0",
     "express": "^4.21.2"
   },
   "devDependencies": {

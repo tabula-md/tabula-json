@@ -4,14 +4,13 @@ import http from "node:http";
 import path from "node:path";
 import express, { type RequestHandler } from "express";
 import {
-  JSON_SHARE_RECORD_VERSION,
   ProtocolError,
-  type JsonShareInput,
-  type PublicJsonShareSnapshot,
   validateJsonShareId,
-  validateJsonShareInput,
+  validateJsonShareBlob,
 } from "./protocol.js";
 import { FileJsonShareStore } from "./storage/file-store.js";
+import { R2JsonShareStore } from "./storage/r2-store.js";
+import type { JsonShareStore } from "./storage/store.js";
 
 type ServerOptions = {
   allowedOrigins?: string[];
@@ -26,7 +25,7 @@ type RateLimiter = {
 };
 
 const defaultPort = 3004;
-const defaultMaxPayloadBytes = 1024 * 1024;
+const defaultMaxPayloadBytes = 2 * 1024 * 1024;
 const defaultRateLimitPerMinute = 120;
 const serviceVersion = readPackageVersion();
 
@@ -39,15 +38,41 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
   const rateLimitPerMinute =
     options.rateLimitPerMinute ?? numberFromEnv("TABULA_JSON_RATE_LIMIT_PER_MINUTE", defaultRateLimitPerMinute);
 
-  const store = new FileJsonShareStore(dataDir);
+  const store = createJsonShareStore({ dataDir });
   const app = express();
   const server = http.createServer(app);
   const rateLimiter = createRateLimiter({ limit: rateLimitPerMinute });
 
-  app.use(applyCors(allowedOrigins));
-  app.use(express.json({ limit: `${maxPayloadBytes}b` }));
+  app.get("/", applyOpenCors(), (_request, response) => {
+    response
+      .status(200)
+      .type("html")
+      .send(`<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tabula JSON Store</title>
+    <style>
+      :root { color-scheme: light dark; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: Canvas; color: CanvasText; }
+      main { width: min(560px, calc(100vw - 48px)); }
+      h1 { font-size: 28px; margin: 0 0 12px; }
+      p { color: color-mix(in srgb, CanvasText 68%, transparent); font-size: 16px; line-height: 1.55; margin: 0; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Tabula JSON Store</h1>
+      <p>Encrypted snapshot storage for <code>Tabula.md</code> share links.</p>
+      <p>The server cannot decrypt stored snapshots.</p>
+    </main>
+  </body>
+</html>`);
+  });
 
-  app.get("/health", (_request, response) => {
+  app.get("/health", applyOpenCors(), (_request, response) => {
     response.json({
       ok: true,
       service: "tabula-json",
@@ -55,30 +80,34 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
     });
   });
 
-  app.post("/v1/json", async (request, response, next) => {
-    try {
-      rateLimiter.assertAllowed(`json-share-write:${request.ip}`);
-      const input = validateJsonShareInput(request.body, { maxPayloadBytes });
-      const jsonId = await generateUniqueJsonShareId(store);
-      const timestamp = new Date().toISOString();
-      const snapshot = buildPublicJsonShareSnapshot({
-        input,
-        jsonId,
-        createdAt: timestamp,
-      });
+  app.options("/v1/json", applyWriteCors(allowedOrigins));
+  app.post(
+    "/v1/json",
+    applyWriteCors(allowedOrigins),
+    express.raw({ limit: `${maxPayloadBytes}b`, type: "*/*" }),
+    async (request, response, next) => {
+      try {
+        rateLimiter.assertAllowed(`json-share-write:${request.ip}`);
+        if (!request.is("application/octet-stream")) {
+          throw new ProtocolError(415, "JSON share payload must be application/octet-stream");
+        }
+        const snapshot = validateJsonShareBlob(request.body, { maxPayloadBytes });
+        const jsonId = await generateUniqueJsonShareId(store);
+        const timestamp = new Date().toISOString();
 
-      await store.writeJsonShare(snapshot);
+        await store.writeJsonShare(jsonId, snapshot);
 
-      response.status(201).json({
-        jsonId,
-        createdAt: snapshot.createdAt,
-      });
-    } catch (error) {
-      next(error);
-    }
-  });
+        response.status(201).json({
+          jsonId,
+          createdAt: timestamp,
+        });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
-  app.get("/v1/json/:jsonId", async (request, response, next) => {
+  app.get("/v1/json/:jsonId", applyOpenCors(), async (request, response, next) => {
     try {
       const jsonId = validateJsonShareId(request.params.jsonId);
       const snapshot = await store.getJsonShare(jsonId);
@@ -86,7 +115,7 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
         response.status(404).json({ error: "JSON share not found" });
         return;
       }
-      response.json(snapshot);
+      response.status(200).type("application/octet-stream").send(snapshot);
     } catch (error) {
       next(error);
     }
@@ -105,11 +134,6 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
       response.status(413).json({ error: "Request body is too large" });
       return;
     }
-    if (isJsonParseError(error)) {
-      response.status(400).json({ error: "Invalid JSON body" });
-      return;
-    }
-
     response.status(500).json({ error: "Internal server error" });
   });
 
@@ -125,7 +149,7 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
   };
 }
 
-async function generateUniqueJsonShareId(store: FileJsonShareStore) {
+async function generateUniqueJsonShareId(store: JsonShareStore) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const jsonId = crypto.randomBytes(16).toString("base64url");
     if (!(await store.getJsonShare(jsonId))) {
@@ -135,25 +159,43 @@ async function generateUniqueJsonShareId(store: FileJsonShareStore) {
   throw new Error("Unable to allocate JSON share id");
 }
 
-function buildPublicJsonShareSnapshot({
-  input,
-  jsonId,
-  createdAt,
-}: {
-  input: JsonShareInput;
-  jsonId: string;
-  createdAt: string;
-}): PublicJsonShareSnapshot {
-  return {
-    v: JSON_SHARE_RECORD_VERSION,
-    jsonId,
-    createdAt,
-    encryptedData: input.encryptedData,
-    iv: input.iv,
+function createJsonShareStore({ dataDir }: { dataDir: string }): JsonShareStore {
+  const storageDriver = (process.env.TABULA_JSON_STORAGE_DRIVER ?? process.env.TABULA_JSON_STORAGE ?? "file")
+    .trim()
+    .toLowerCase();
+
+  if (storageDriver === "file") {
+    return new FileJsonShareStore(dataDir);
+  }
+
+  if (storageDriver === "r2") {
+    return new R2JsonShareStore({
+      accessKeyId: requiredEnv("TABULA_JSON_R2_ACCESS_KEY_ID"),
+      accountId: process.env.TABULA_JSON_R2_ACCOUNT_ID,
+      bucket: requiredEnv("TABULA_JSON_R2_BUCKET"),
+      endpoint: process.env.TABULA_JSON_R2_ENDPOINT,
+      prefix: process.env.TABULA_JSON_R2_PREFIX,
+      secretAccessKey: requiredEnv("TABULA_JSON_R2_SECRET_ACCESS_KEY"),
+    });
+  }
+
+  throw new Error(`Unsupported TABULA_JSON_STORAGE_DRIVER: ${storageDriver}`);
+}
+
+function applyOpenCors(): RequestHandler {
+  return (request, response, next) => {
+    response.setHeader("Access-Control-Allow-Origin", "*");
+    response.setHeader("Access-Control-Allow-Methods", "GET,HEAD,OPTIONS");
+    response.setHeader("Access-Control-Allow-Headers", "content-type");
+    if (request.method === "OPTIONS") {
+      response.status(204).end();
+      return;
+    }
+    next();
   };
 }
 
-function applyCors(allowedOrigins: string[]): RequestHandler {
+function applyWriteCors(allowedOrigins: string[]): RequestHandler {
   const allowedOriginSet = new Set(allowedOrigins);
   return (request, response, next) => {
     const origin = request.headers.origin;
@@ -161,7 +203,7 @@ function applyCors(allowedOrigins: string[]): RequestHandler {
       response.setHeader("Access-Control-Allow-Origin", origin);
       response.setHeader("Vary", "Origin");
       response.setHeader("Access-Control-Allow-Headers", "content-type");
-      response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+      response.setHeader("Access-Control-Allow-Methods", "POST,OPTIONS");
     }
     if (request.method === "OPTIONS") {
       response.status(origin && !isAllowedOrigin(origin, allowedOriginSet) ? 403 : 204).end();
@@ -225,15 +267,22 @@ function numberFromEnv(name: string, fallback: number) {
     return fallback;
   }
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative number.`);
+  }
+  return parsed;
+}
+
+function requiredEnv(name: string) {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`${name} is required.`);
+  }
+  return value;
 }
 
 function isRequestBodyTooLarge(error: unknown) {
   return Boolean(error && typeof error === "object" && "type" in error && error.type === "entity.too.large");
-}
-
-function isJsonParseError(error: unknown) {
-  return Boolean(error && typeof error === "object" && "type" in error && error.type === "entity.parse.failed");
 }
 
 function readPackageVersion() {
