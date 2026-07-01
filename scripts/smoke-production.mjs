@@ -7,7 +7,7 @@ if (!health.ok) {
   throw new Error(`Health check failed: ${health.status} ${await health.text()}`);
 }
 
-const createResponse = await fetch(`${serviceUrl}/api/v1/post/`, {
+const createResponse = await fetch(`${serviceUrl}/api/v2/post/`, {
   body: payload,
   headers: {
     "content-type": "application/octet-stream",
@@ -24,7 +24,7 @@ if (!isRecord(created) || typeof created.id !== "string" || !/^[A-Za-z0-9_-]{8,8
   throw new Error("Create failed: invalid id in service response.");
 }
 
-const expectedDataUrl = `${serviceUrl}/api/v1/${created.id}`;
+const expectedDataUrl = `${serviceUrl}/api/v2/${created.id}`;
 if (created.data !== expectedDataUrl) {
   throw new Error(`Create failed: expected data URL ${expectedDataUrl}, got ${String(created.data)}`);
 }

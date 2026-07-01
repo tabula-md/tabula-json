@@ -5,7 +5,7 @@ Encrypted snapshot storage for Tabula.md share links.
 Service page: [json.tabula.md](https://json.tabula.md).
 Source: [tabula-md/tabula-json](https://github.com/tabula-md/tabula-json).
 
-This service backs Excalidraw-style snapshot links:
+This service backs encrypted snapshot links:
 
 ```text
 https://tabula.md/#json=<jsonId>,<decryptionKey>
@@ -25,7 +25,7 @@ that can be opened later as a replace/import flow.
 
 Returns service health.
 
-### `POST /api/v1/post/`
+### `POST /api/v2/post/`
 
 Stores an encrypted snapshot.
 
@@ -34,7 +34,7 @@ Write requests are CORS-limited to `TABULA_JSON_ALLOWED_ORIGINS`.
 Request:
 
 ```http
-POST /api/v1/post/
+POST /api/v2/post/
 Content-Type: application/octet-stream
 
 <opaque encrypted bytes>
@@ -45,12 +45,11 @@ Response:
 ```json
 {
   "id": "generated-id",
-  "data": "https://json.tabula.md/api/v1/generated-id",
-  "createdAt": "2026-06-28T00:00:00.000Z"
+  "data": "https://json.tabula.md/api/v2/generated-id"
 }
 ```
 
-### `GET /api/v1/:id`
+### `GET /api/v2/:id`
 
 Returns the stored encrypted snapshot bytes.
 
@@ -64,6 +63,9 @@ Content-Type: application/octet-stream
 <opaque encrypted bytes>
 ```
 
+`/api/v1/post/` and `/api/v1/:id` remain available as compatibility aliases for
+older Tabula.md clients.
+
 ## Local Development
 
 ```sh
@@ -72,11 +74,6 @@ npm run dev
 ```
 
 The Node development server listens on `http://localhost:3004` by default.
-To run the Cloudflare Worker locally:
-
-```sh
-npm run dev:worker
-```
 
 Use Tabula.md with:
 
@@ -84,37 +81,53 @@ Use Tabula.md with:
 VITE_TABULA_JSON_URL=http://localhost:3004 npm run dev
 ```
 
-## Production: Cloudflare Worker + R2
+## Production: App Engine + Google Cloud Storage
 
-Production should run as a Cloudflare Worker with an R2 bucket binding. The
-Worker uses the `SNAPSHOTS` R2 binding directly, so no R2 access key or S3
-compatibility secret is needed in production.
+Production should run the Node service on Google App Engine with Google Cloud
+Storage as the persistent encrypted object store.
 
-`wrangler.jsonc` defines:
+Required environment:
 
-- Worker name: `tabula-json`
-- R2 binding: `SNAPSHOTS`
-- Bucket name: `tabula-json`
-- Allowed origins: `https://tabula.md,https://www.tabula.md`
-- Max payload: `2097152` bytes
+```env
+NODE_ENV=production
+TABULA_JSON_ALLOWED_ORIGINS=https://tabula.md,https://www.tabula.md
+TABULA_JSON_STORAGE_DRIVER=gcs
+TABULA_JSON_GCS_BUCKET=tabula-json-prod
+TABULA_JSON_GCS_PREFIX=json/
+TABULA_JSON_MAX_PAYLOAD_BYTES=2097152
+```
 
-Deploy:
+The service uses Google Application Default Credentials. For App Engine, grant
+the App Engine default service account or the configured app service account
+object read/write access to the bucket. For local production testing,
+authenticate with `gcloud auth application-default login` or set
+`GOOGLE_APPLICATION_CREDENTIALS` to a service account key file.
+
+Build and run:
 
 ```sh
-npm run deploy:dry-run
-npm run deploy
+npm run build
+npm start
+```
+
+App Engine deploy:
+
+```sh
+GOOGLE_CLOUD_PROJECT=tabula-md-prod npm run deploy
 npm run smoke:production
 ```
 
-Attach `json.tabula.md` as a Worker custom domain in Cloudflare.
+Attach `json.tabula.md` to the App Engine service through the chosen DNS
+provider or load balancer.
 
 ## Retention and Abuse Controls
 
 Share links are intended to be durable. Production buckets should not expire
 objects unless the product explicitly changes the share-link contract.
 
-Use Cloudflare WAF and rate limiting in front of `json.tabula.md` for abuse
-protection. Do not implement product policy in this opaque store.
+Use an edge proxy, load balancer, or platform-level rate limiting in front of
+`json.tabula.md` for abuse protection. Do not implement product policy in this
+opaque store.
 
 ## Node Self-hosting
 
@@ -133,17 +146,18 @@ For Node production, `TABULA_JSON_STORAGE_DRIVER` is required. Supported
 drivers:
 
 - `file`: stores records under `TABULA_JSON_DATA_DIR`.
-- `r2`: uses Cloudflare R2's S3-compatible API for hosts that are not running
-  on Cloudflare Workers.
+- `gcs`: stores records in Google Cloud Storage.
 
 ## Deployment Checklist
 
-1. Create a Cloudflare R2 bucket, for example `tabula-json`.
-2. Run `npm run typegen` after changing `wrangler.jsonc`.
-3. Run `npm run deploy:dry-run`.
-4. Deploy this Worker with `npm run deploy`.
-5. Attach `json.tabula.md` to the Worker.
-6. Run `npm run smoke:production`.
-7. Set `VITE_TABULA_JSON_URL=https://json.tabula.md` on the Tabula.md web app.
-8. Redeploy Tabula.md.
-9. Run a share-link round trip against `https://tabula.md`.
+1. Create a private Google Cloud Storage bucket, for example
+   `tabula-json-prod`.
+2. Create or choose a service account for the JSON service.
+3. Grant that service account object read/write access to the bucket.
+4. Confirm `app.yaml` points at the production bucket and allowed origins.
+5. Deploy this Node service with `GOOGLE_CLOUD_PROJECT=tabula-md-prod npm run deploy`.
+6. Attach `json.tabula.md` to the App Engine service.
+7. Run `npm run smoke:production`.
+8. Set `VITE_TABULA_JSON_URL=https://json.tabula.md` on the Tabula.md web app.
+9. Redeploy Tabula.md.
+10. Run a share-link round trip against `https://tabula.md`.

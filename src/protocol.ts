@@ -1,7 +1,9 @@
 const jsonIdPattern = /^[a-zA-Z0-9_-]{8,80}$/;
 
-export const jsonShareApiPrefix = "/api/v1/";
-export const jsonSharePostPath = "/api/v1/post/";
+export const jsonShareApiPrefix = "/api/v2/";
+export const jsonSharePostPath = "/api/v2/post/";
+export const legacyJsonShareApiPrefix = "/api/v1/";
+export const legacyJsonSharePostPath = "/api/v1/post/";
 export const jsonShareContentType = "application/octet-stream";
 export const jsonShareCacheControl = "public, max-age=31536000, immutable";
 export const defaultMaxPayloadBytes = 2 * 1024 * 1024;

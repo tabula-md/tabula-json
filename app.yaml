@@ -1,0 +1,9 @@
+runtime: nodejs22
+
+env_variables:
+  NODE_ENV: production
+  TABULA_JSON_ALLOWED_ORIGINS: "https://tabula.md,https://www.tabula.md"
+  TABULA_JSON_STORAGE_DRIVER: gcs
+  TABULA_JSON_GCS_BUCKET: tabula-json-prod
+  TABULA_JSON_GCS_PREFIX: json/
+  TABULA_JSON_MAX_PAYLOAD_BYTES: "2097152"

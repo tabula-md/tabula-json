@@ -5,6 +5,8 @@ import path from "node:path";
 import express, { type RequestHandler } from "express";
 import {
   defaultMaxPayloadBytes,
+  legacyJsonShareApiPrefix,
+  legacyJsonSharePostPath,
   jsonShareApiPrefix,
   jsonShareCacheControl,
   jsonShareContentType,
@@ -15,7 +17,7 @@ import {
 } from "./protocol.js";
 import { servicePageHtml } from "./service-page.js";
 import { FileJsonShareStore } from "./storage/file-store.js";
-import { R2JsonShareStore } from "./storage/r2-store.js";
+import { GcsJsonShareStore } from "./storage/gcs-store.js";
 import type { JsonShareStore } from "./storage/store.js";
 
 type ServerOptions = {
@@ -52,50 +54,78 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
     });
   });
 
-  app.options(jsonSharePostPath, applyWriteCors(allowedOrigins));
-  app.post(
-    jsonSharePostPath,
-    applyWriteCors(allowedOrigins),
-    express.raw({ limit: `${maxPayloadBytes}b`, type: "*/*" }),
-    async (request, response, next) => {
-      try {
-        if (!request.is(jsonShareContentType)) {
-          throw new ProtocolError(415, `JSON share payload must be ${jsonShareContentType}`);
+  const registerJsonShareRoutes = ({
+    apiPrefix,
+    includeCreatedAt,
+    postPath,
+    statusCode,
+  }: {
+    apiPrefix: string;
+    includeCreatedAt: boolean;
+    postPath: string;
+    statusCode: number;
+  }) => {
+    app.options(postPath, applyWriteCors(allowedOrigins));
+    app.post(
+      postPath,
+      applyWriteCors(allowedOrigins),
+      express.raw({ limit: `${maxPayloadBytes}b`, type: "*/*" }),
+      async (request, response, next) => {
+        try {
+          if (!request.is(jsonShareContentType)) {
+            throw new ProtocolError(415, `JSON share payload must be ${jsonShareContentType}`);
+          }
+          const snapshot = validateJsonShareBlob(request.body, { maxPayloadBytes });
+          const jsonId = await generateUniqueJsonShareId(store);
+          const timestamp = new Date().toISOString();
+
+          await store.writeJsonShare(jsonId, snapshot);
+
+          const responseBody: { createdAt?: string; data: string; id: string } = {
+            id: jsonId,
+            data: `${getRequestOrigin(request)}${apiPrefix}${jsonId}`,
+          };
+          if (includeCreatedAt) {
+            responseBody.createdAt = timestamp;
+          }
+          response.status(statusCode).json(responseBody);
+        } catch (error) {
+          next(error);
         }
-        const snapshot = validateJsonShareBlob(request.body, { maxPayloadBytes });
-        const jsonId = await generateUniqueJsonShareId(store);
-        const timestamp = new Date().toISOString();
+      },
+    );
 
-        await store.writeJsonShare(jsonId, snapshot);
-
-        response.status(201).json({
-          id: jsonId,
-          data: `${getRequestOrigin(request)}${jsonShareApiPrefix}${jsonId}`,
-          createdAt: timestamp,
-        });
+    app.get(`${apiPrefix}:jsonId`, applyOpenCors(), async (request, response, next) => {
+      try {
+        const jsonId = validateJsonShareId(request.params.jsonId);
+        const snapshot = await store.getJsonShare(jsonId);
+        if (!snapshot) {
+          response.status(404).json({ error: "JSON share not found" });
+          return;
+        }
+        response
+          .status(200)
+          .setHeader("Cache-Control", jsonShareCacheControl)
+          .setHeader("X-Content-Type-Options", "nosniff")
+          .type(jsonShareContentType)
+          .send(snapshot);
       } catch (error) {
         next(error);
       }
-    },
-  );
+    });
+  };
 
-  app.get(`${jsonShareApiPrefix}:jsonId`, applyOpenCors(), async (request, response, next) => {
-    try {
-      const jsonId = validateJsonShareId(request.params.jsonId);
-      const snapshot = await store.getJsonShare(jsonId);
-      if (!snapshot) {
-        response.status(404).json({ error: "JSON share not found" });
-        return;
-      }
-      response
-        .status(200)
-        .setHeader("Cache-Control", jsonShareCacheControl)
-        .setHeader("X-Content-Type-Options", "nosniff")
-        .type(jsonShareContentType)
-        .send(snapshot);
-    } catch (error) {
-      next(error);
-    }
+  registerJsonShareRoutes({
+    apiPrefix: jsonShareApiPrefix,
+    includeCreatedAt: false,
+    postPath: jsonSharePostPath,
+    statusCode: 200,
+  });
+  registerJsonShareRoutes({
+    apiPrefix: legacyJsonShareApiPrefix,
+    includeCreatedAt: true,
+    postPath: legacyJsonSharePostPath,
+    statusCode: 201,
   });
 
   app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
@@ -125,7 +155,8 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
 async function generateUniqueJsonShareId(store: JsonShareStore) {
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const jsonId = crypto.randomBytes(16).toString("base64url");
-    if (!(await store.getJsonShare(jsonId))) {
+    const exists = store.hasJsonShare ? await store.hasJsonShare(jsonId) : Boolean(await store.getJsonShare(jsonId));
+    if (!exists) {
       return jsonId;
     }
   }
@@ -143,14 +174,10 @@ function createJsonShareStore({ dataDir }: { dataDir: string }): JsonShareStore 
     return new FileJsonShareStore(dataDir);
   }
 
-  if (storageDriver === "r2") {
-    return new R2JsonShareStore({
-      accessKeyId: requiredEnv("TABULA_JSON_R2_ACCESS_KEY_ID"),
-      accountId: process.env.TABULA_JSON_R2_ACCOUNT_ID,
-      bucket: requiredEnv("TABULA_JSON_R2_BUCKET"),
-      endpoint: process.env.TABULA_JSON_R2_ENDPOINT,
-      prefix: process.env.TABULA_JSON_R2_PREFIX,
-      secretAccessKey: requiredEnv("TABULA_JSON_R2_SECRET_ACCESS_KEY"),
+  if (storageDriver === "gcs") {
+    return new GcsJsonShareStore({
+      bucket: requiredEnv("TABULA_JSON_GCS_BUCKET"),
+      prefix: process.env.TABULA_JSON_GCS_PREFIX,
     });
   }
 

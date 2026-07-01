@@ -24,8 +24,9 @@ Tabula.md. It stores ciphertext for `#json=<id>,<key>` links.
 
 ## Repository Map
 
-- `src/worker.ts`: Cloudflare Worker service and R2 binding routes.
 - `src/server.ts`: Node/Express service for local development and self-hosting.
 - `src/protocol.ts`: encrypted JSON payload and ID validation.
 - `src/storage/file-store.ts`: local encrypted record persistence.
+- `src/storage/gcs-store.ts`: Google Cloud Storage encrypted object
+  persistence.
 - `test`: protocol and server tests.
