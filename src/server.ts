@@ -15,6 +15,7 @@ import {
   validateJsonShareId,
   validateJsonShareBlob,
 } from "./protocol.js";
+import { createRateLimiter, RateLimitError, type RateLimiter } from "./rate-limit.js";
 import { servicePageHtml } from "./service-page.js";
 import { FileJsonShareStore } from "./storage/file-store.js";
 import { GcsJsonShareStore } from "./storage/gcs-store.js";
@@ -25,10 +26,22 @@ type ServerOptions = {
   dataDir?: string;
   maxPayloadBytes?: number;
   port?: number;
+  rateLimits?: Partial<RateLimitOptions>;
 };
 
 const defaultPort = 3004;
+const defaultReadRateLimitPerMinute = 600;
+const defaultWriteRateLimitPerMinute = 30;
+const defaultGlobalReadRateLimitPerMinute = 3000;
+const defaultGlobalWriteRateLimitPerMinute = 120;
 const serviceVersion = readPackageVersion();
+
+type RateLimitOptions = {
+  readPerClientPerMinute: number;
+  writePerClientPerMinute: number;
+  globalReadPerMinute: number;
+  globalWritePerMinute: number;
+};
 
 export function createTabulaJsonServer(options: ServerOptions = {}) {
   const port = options.port ?? numberFromEnv("PORT", defaultPort);
@@ -36,10 +49,15 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
   const allowedOrigins = options.allowedOrigins ?? parseAllowedOrigins(process.env.TABULA_JSON_ALLOWED_ORIGINS);
   const maxPayloadBytes =
     options.maxPayloadBytes ?? numberFromEnv("TABULA_JSON_MAX_PAYLOAD_BYTES", defaultMaxPayloadBytes);
+  const rateLimits = resolveRateLimits(options.rateLimits);
 
   const store = createJsonShareStore({ dataDir });
   const app = express();
   const server = http.createServer(app);
+  const readRateLimiter = createRateLimiter({ limit: rateLimits.readPerClientPerMinute });
+  const writeRateLimiter = createRateLimiter({ limit: rateLimits.writePerClientPerMinute });
+  const globalReadRateLimiter = createRateLimiter({ limit: rateLimits.globalReadPerMinute });
+  const globalWriteRateLimiter = createRateLimiter({ limit: rateLimits.globalWritePerMinute });
   app.enable("strict routing");
 
   app.get("/", applyOpenCors(), (_request, response) => {
@@ -69,6 +87,11 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
     app.post(
       postPath,
       applyWriteCors(allowedOrigins),
+      applyRateLimit({
+        route: "write",
+        perClient: writeRateLimiter,
+        global: globalWriteRateLimiter,
+      }),
       express.raw({ limit: `${maxPayloadBytes}b`, type: "*/*" }),
       async (request, response, next) => {
         try {
@@ -95,24 +118,33 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
       },
     );
 
-    app.get(`${apiPrefix}:jsonId`, applyOpenCors(), async (request, response, next) => {
-      try {
-        const jsonId = validateJsonShareId(request.params.jsonId);
-        const snapshot = await store.getJsonShare(jsonId);
-        if (!snapshot) {
-          response.status(404).json({ error: "JSON share not found" });
-          return;
+    app.get(
+      `${apiPrefix}:jsonId`,
+      applyOpenCors(),
+      applyRateLimit({
+        route: "read",
+        perClient: readRateLimiter,
+        global: globalReadRateLimiter,
+      }),
+      async (request, response, next) => {
+        try {
+          const jsonId = validateJsonShareId(request.params.jsonId);
+          const snapshot = await store.getJsonShare(jsonId);
+          if (!snapshot) {
+            response.status(404).json({ error: "JSON share not found" });
+            return;
+          }
+          response
+            .status(200)
+            .setHeader("Cache-Control", jsonShareCacheControl)
+            .setHeader("X-Content-Type-Options", "nosniff")
+            .type(jsonShareContentType)
+            .send(snapshot);
+        } catch (error) {
+          next(error);
         }
-        response
-          .status(200)
-          .setHeader("Cache-Control", jsonShareCacheControl)
-          .setHeader("X-Content-Type-Options", "nosniff")
-          .type(jsonShareContentType)
-          .send(snapshot);
-      } catch (error) {
-        next(error);
-      }
-    });
+      },
+    );
   };
 
   registerJsonShareRoutes({
@@ -133,6 +165,10 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
       response.status(error.statusCode).json({ error: error.message });
       return;
     }
+    if (error instanceof RateLimitError) {
+      response.status(error.statusCode).json({ error: error.message });
+      return;
+    }
     if (isRequestBodyTooLarge(error)) {
       response.status(413).json({ error: "Request body is too large" });
       return;
@@ -150,6 +186,51 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
     port,
     server,
   };
+}
+
+function resolveRateLimits(overrides: Partial<RateLimitOptions> = {}): RateLimitOptions {
+  return {
+    readPerClientPerMinute:
+      overrides.readPerClientPerMinute ??
+      numberFromEnv("TABULA_JSON_READ_RATE_LIMIT_PER_MINUTE", defaultReadRateLimitPerMinute),
+    writePerClientPerMinute:
+      overrides.writePerClientPerMinute ??
+      numberFromEnv("TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE", defaultWriteRateLimitPerMinute),
+    globalReadPerMinute:
+      overrides.globalReadPerMinute ??
+      numberFromEnv("TABULA_JSON_GLOBAL_READ_RATE_LIMIT_PER_MINUTE", defaultGlobalReadRateLimitPerMinute),
+    globalWritePerMinute:
+      overrides.globalWritePerMinute ??
+      numberFromEnv("TABULA_JSON_GLOBAL_WRITE_RATE_LIMIT_PER_MINUTE", defaultGlobalWriteRateLimitPerMinute),
+  };
+}
+
+function applyRateLimit({
+  global,
+  perClient,
+  route,
+}: {
+  global: RateLimiter;
+  perClient: RateLimiter;
+  route: "read" | "write";
+}): RequestHandler {
+  return (request, _response, next) => {
+    try {
+      global.assertAllowed(`${route}:global`);
+      perClient.assertAllowed(`${route}:${clientRateLimitKey(request)}`);
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+function clientRateLimitKey(request: express.Request) {
+  const forwardedFor = request.headers["x-forwarded-for"];
+  const firstForwardedIp = Array.isArray(forwardedFor)
+    ? forwardedFor[0]?.split(",")[0]?.trim()
+    : forwardedFor?.split(",")[0]?.trim();
+  return firstForwardedIp || request.ip || request.socket.remoteAddress || "unknown";
 }
 
 async function generateUniqueJsonShareId(store: JsonShareStore) {

@@ -95,7 +95,17 @@ TABULA_JSON_STORAGE_DRIVER=gcs
 TABULA_JSON_GCS_BUCKET=tabula-json-prod
 TABULA_JSON_GCS_PREFIX=json/
 TABULA_JSON_MAX_PAYLOAD_BYTES=2097152
+TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE=30
+TABULA_JSON_READ_RATE_LIMIT_PER_MINUTE=600
+TABULA_JSON_GLOBAL_WRITE_RATE_LIMIT_PER_MINUTE=120
+TABULA_JSON_GLOBAL_READ_RATE_LIMIT_PER_MINUTE=3000
 ```
+
+`app.yaml` runs on F1 automatic scaling with `min_instances: 0` and
+`max_instances: 3`. This keeps idle cost low, caps runaway scale, and still
+lets short share-link bursts start additional instances. Snapshot creation is
+rate-limited more tightly than snapshot reads because writes create durable GCS
+objects.
 
 The service uses Google Application Default Credentials. For App Engine, grant
 the App Engine default service account or the configured app service account
@@ -125,9 +135,10 @@ provider or load balancer.
 Share links are intended to be durable. Production buckets should not expire
 objects unless the product explicitly changes the share-link contract.
 
-Use an edge proxy, load balancer, or platform-level rate limiting in front of
-`json.tabula.md` for abuse protection. Do not implement product policy in this
-opaque store.
+The service applies per-instance IP and global rate limits for snapshot writes
+and reads. These are cost and abuse guardrails, not account-level product
+policy. For larger launches, add edge or load-balancer rate limiting in front of
+`json.tabula.md` so distributed abuse is stopped before it reaches App Engine.
 
 ## Node Self-hosting
 
@@ -140,6 +151,8 @@ TABULA_JSON_ALLOWED_ORIGINS=https://tabula.md
 TABULA_JSON_STORAGE_DRIVER=file
 TABULA_JSON_DATA_DIR=/data
 TABULA_JSON_MAX_PAYLOAD_BYTES=2097152
+TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE=30
+TABULA_JSON_READ_RATE_LIMIT_PER_MINUTE=600
 ```
 
 For Node production, `TABULA_JSON_STORAGE_DRIVER` is required. Supported

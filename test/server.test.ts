@@ -147,6 +147,91 @@ describe("Tabula JSON server", () => {
       .expect("access-control-allow-origin", "*");
   });
 
+  it("rate limits repeated snapshot writes per client", async () => {
+    const server = createTabulaJsonServer({
+      dataDir: temporaryDirectory,
+      allowedOrigins: ["https://tabula.md"],
+      rateLimits: {
+        writePerClientPerMinute: 1,
+        globalWritePerMinute: 100,
+      },
+    });
+
+    await request(server.app)
+      .post("/api/v2/post/")
+      .set("origin", "https://tabula.md")
+      .set("x-forwarded-for", "203.0.113.10")
+      .set("content-type", "application/octet-stream")
+      .send(encryptedBlob)
+      .expect(200);
+
+    await request(server.app)
+      .post("/api/v2/post/")
+      .set("origin", "https://tabula.md")
+      .set("x-forwarded-for", "203.0.113.10")
+      .set("content-type", "application/octet-stream")
+      .send(encryptedBlob)
+      .expect(429)
+      .expect((response) => {
+        expect(response.body.error).toBe("Rate limit exceeded");
+      });
+  });
+
+  it("rate limits public snapshot reads per client", async () => {
+    const server = createTabulaJsonServer({
+      dataDir: temporaryDirectory,
+      allowedOrigins: ["https://tabula.md"],
+      rateLimits: {
+        readPerClientPerMinute: 1,
+        globalReadPerMinute: 100,
+      },
+    });
+    const createResponse = await request(server.app)
+      .post("/api/v2/post/")
+      .set("origin", "https://tabula.md")
+      .set("content-type", "application/octet-stream")
+      .send(encryptedBlob)
+      .expect(200);
+
+    await request(server.app)
+      .get(`/api/v2/${createResponse.body.id}`)
+      .set("x-forwarded-for", "203.0.113.20")
+      .buffer(true)
+      .expect(200);
+
+    await request(server.app)
+      .get(`/api/v2/${createResponse.body.id}`)
+      .set("x-forwarded-for", "203.0.113.20")
+      .expect(429);
+  });
+
+  it("applies global snapshot write limits across clients", async () => {
+    const server = createTabulaJsonServer({
+      dataDir: temporaryDirectory,
+      allowedOrigins: ["https://tabula.md"],
+      rateLimits: {
+        writePerClientPerMinute: 100,
+        globalWritePerMinute: 1,
+      },
+    });
+
+    await request(server.app)
+      .post("/api/v2/post/")
+      .set("origin", "https://tabula.md")
+      .set("x-forwarded-for", "203.0.113.30")
+      .set("content-type", "application/octet-stream")
+      .send(encryptedBlob)
+      .expect(200);
+
+    await request(server.app)
+      .post("/api/v2/post/")
+      .set("origin", "https://tabula.md")
+      .set("x-forwarded-for", "203.0.113.31")
+      .set("content-type", "application/octet-stream")
+      .send(encryptedBlob)
+      .expect(429);
+  });
+
   it("allows localhost origins when no allowlist is configured", async () => {
     const server = createTabulaJsonServer({ dataDir: temporaryDirectory, allowedOrigins: [] });
     await request(server.app)
@@ -186,6 +271,23 @@ describe("Tabula JSON server", () => {
         delete process.env.TABULA_JSON_MAX_PAYLOAD_BYTES;
       } else {
         process.env.TABULA_JSON_MAX_PAYLOAD_BYTES = originalValue;
+      }
+    }
+  });
+
+  it("fails fast when rate limit environment variables are invalid", () => {
+    const originalValue = process.env.TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE;
+    process.env.TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE = "not-a-number";
+
+    try {
+      expect(() =>
+        createTabulaJsonServer({ dataDir: temporaryDirectory, allowedOrigins: ["https://tabula.md"] }),
+      ).toThrow("TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE must be a non-negative number.");
+    } finally {
+      if (originalValue === undefined) {
+        delete process.env.TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE;
+      } else {
+        process.env.TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE = originalValue;
       }
     }
   });
