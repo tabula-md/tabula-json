@@ -1,29 +1,25 @@
 # Tabula JSON Store
 
-Encrypted snapshot storage for Tabula.md share links.
+Encrypted snapshot storage for [Tabula.md](https://tabula.md) share links.
 
-Service page: [json.tabula.md](https://json.tabula.md).
-Source: [tabula-md/tabula-json](https://github.com/tabula-md/tabula-json).
+Service: [json.tabula.md](https://json.tabula.md) · Source:
+[tabula-md/tabula-json](https://github.com/tabula-md/tabula-json)
 
-This service backs encrypted snapshot links:
+This service stores immutable encrypted snapshot blobs for links like:
 
 ```text
 https://tabula.md/#json=<jsonId>,<decryptionKey>
 ```
 
-The browser serializes and encrypts a Tabula.md workspace snapshot before
-upload. This service stores only an opaque encrypted blob. The decryption key
-stays after `#` in the Tabula.md URL and is not sent to this service.
+The Tabula.md browser client serializes and encrypts a workspace snapshot before
+uploading it. The decryption key stays after `#` in the Tabula.md URL and is
+not sent to this service.
 
 Tabula JSON Store is not the live collaboration server. `tabula-room` relays
-real-time editing updates. `tabula-json` stores encrypted read-only snapshots
-that can be opened later as a replace/import flow.
+real-time editing updates; `tabula-json` stores encrypted snapshots that can be
+opened later through the replace/import flow.
 
-## API
-
-### `GET /health`
-
-Returns service health.
+## Protocol
 
 ### `POST /api/v2/post/`
 
@@ -53,8 +49,9 @@ Response:
 
 Returns the stored encrypted snapshot bytes.
 
-Read requests are public because the record is ciphertext. The decryption key
-stays in the `#json` fragment on `tabula.md` and is never sent to this service.
+Read requests are public because stored records are ciphertext. The decryption
+key stays in the `#json` fragment on `tabula.md` and is never sent to this
+service.
 
 ```http
 HTTP/1.1 200 OK
@@ -63,28 +60,34 @@ Content-Type: application/octet-stream
 <opaque encrypted bytes>
 ```
 
+If the id does not exist, the service returns `404`.
+
+### `GET /health`
+
+Returns service health.
+
 `/api/v1/post/` and `/api/v1/:id` remain available as compatibility aliases for
 older Tabula.md clients.
 
-## Local Development
+## Development
 
 ```sh
 npm install
 npm run dev
 ```
 
-The Node development server listens on `http://localhost:3004` by default.
+The development server listens on `http://localhost:3004` by default.
 
-Use Tabula.md with:
+Run Tabula.md against a local JSON store with:
 
 ```sh
 VITE_TABULA_JSON_URL=http://localhost:3004 npm run dev
 ```
 
-## Production: App Engine + Google Cloud Storage
+## Production
 
-Production should run the Node service on Google App Engine with Google Cloud
-Storage as the persistent encrypted object store.
+The hosted v0 deployment runs the Node service on Google App Engine with Google
+Cloud Storage as the persistent encrypted object store.
 
 Required environment:
 
@@ -101,49 +104,33 @@ TABULA_JSON_GLOBAL_WRITE_RATE_LIMIT_PER_MINUTE=120
 TABULA_JSON_GLOBAL_READ_RATE_LIMIT_PER_MINUTE=3000
 ```
 
-`app.yaml` runs on F1 automatic scaling with `min_instances: 0` and
-`max_instances: 3`. This keeps idle cost low, caps runaway scale, and still
-lets short share-link bursts start additional instances. Snapshot creation is
+`app.yaml` uses F1 automatic scaling with `min_instances: 0` and
+`max_instances: 3`. That keeps idle cost low, caps runaway scale, and still
+allows short share-link bursts to start extra instances. Snapshot creation is
 rate-limited more tightly than snapshot reads because writes create durable GCS
 objects.
 
-The service uses Google Application Default Credentials. For App Engine, grant
-the App Engine default service account or the configured app service account
-object read/write access to the bucket. For local production testing,
-authenticate with `gcloud auth application-default login` or set
-`GOOGLE_APPLICATION_CREDENTIALS` to a service account key file.
-
-Build and run:
-
-```sh
-npm run build
-npm start
-```
-
-App Engine deploy:
+Deploy:
 
 ```sh
 GOOGLE_CLOUD_PROJECT=tabula-md-prod npm run deploy
-npm run smoke:production
+TABULA_JSON_SMOKE_URL=https://json.tabula.md npm run smoke:production
 ```
 
-Attach `json.tabula.md` to the App Engine service through the chosen DNS
-provider or load balancer.
+The service uses Google Application Default Credentials. On App Engine, grant
+the App Engine service account object read/write access to the private GCS
+bucket. For local production testing, use `gcloud auth application-default
+login` or set `GOOGLE_APPLICATION_CREDENTIALS`.
 
-## Retention and Abuse Controls
+## Storage Drivers
 
-Share links are intended to be durable. Production buckets should not expire
-objects unless the product explicitly changes the share-link contract.
+`TABULA_JSON_STORAGE_DRIVER` is required outside development.
 
-The service applies per-instance IP and global rate limits for snapshot writes
-and reads. These are cost and abuse guardrails, not account-level product
-policy. For larger launches, add edge or load-balancer rate limiting in front of
-`json.tabula.md` so distributed abuse is stopped before it reaches App Engine.
+- `gcs`: stores records in Google Cloud Storage.
+- `file`: stores records under `TABULA_JSON_DATA_DIR` for local or simple
+  self-hosted deployments.
 
-## Node Self-hosting
-
-The Node/Express server remains available for local development and simple
-self-hosting:
+Example self-hosted file configuration:
 
 ```env
 PORT=3004
@@ -155,22 +142,32 @@ TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE=30
 TABULA_JSON_READ_RATE_LIMIT_PER_MINUTE=600
 ```
 
-For Node production, `TABULA_JSON_STORAGE_DRIVER` is required. Supported
-drivers:
+## Retention and Abuse Controls
 
-- `file`: stores records under `TABULA_JSON_DATA_DIR`.
-- `gcs`: stores records in Google Cloud Storage.
+Share links are intended to be durable. Production buckets should not expire
+objects unless the product explicitly changes the share-link contract.
+
+The service applies per-instance IP and global rate limits for snapshot writes
+and reads. These are cost and abuse guardrails, not account-level product
+policy. For larger launches, add edge or load-balancer rate limiting in front of
+`json.tabula.md` so distributed abuse is stopped before it reaches App Engine.
 
 ## Deployment Checklist
 
-1. Create a private Google Cloud Storage bucket, for example
-   `tabula-json-prod`.
-2. Create or choose a service account for the JSON service.
-3. Grant that service account object read/write access to the bucket.
-4. Confirm `app.yaml` points at the production bucket and allowed origins.
-5. Deploy this Node service with `GOOGLE_CLOUD_PROJECT=tabula-md-prod npm run deploy`.
-6. Attach `json.tabula.md` to the App Engine service.
-7. Run `npm run smoke:production`.
-8. Set `VITE_TABULA_JSON_URL=https://json.tabula.md` on the Tabula.md web app.
-9. Redeploy Tabula.md.
-10. Run a share-link round trip against `https://tabula.md`.
+1. Create a private Google Cloud Storage bucket.
+2. Grant the App Engine service account object read/write access to the bucket.
+3. Confirm `app.yaml` points at the production bucket and allowed origins.
+4. Deploy with `GOOGLE_CLOUD_PROJECT=tabula-md-prod npm run deploy`.
+5. Attach `json.tabula.md` to the App Engine service.
+6. Run `TABULA_JSON_SMOKE_URL=https://json.tabula.md npm run smoke:production`.
+7. Set `VITE_TABULA_JSON_URL=https://json.tabula.md` on the Tabula.md web app.
+8. Redeploy Tabula.md and run a share-link round trip.
+
+## Backed By
+
+Tabula JSON Store is backed by
+[Marker Inc Korea](https://github.com/Marker-Inc-Korea).
+
+## License
+
+MIT. See `LICENSE`.
