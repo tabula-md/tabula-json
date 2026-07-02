@@ -117,6 +117,28 @@ GOOGLE_CLOUD_PROJECT=tabula-md-prod npm run deploy
 TABULA_JSON_SMOKE_URL=https://json.tabula.md npm run smoke:production
 ```
 
+### GitHub Actions Production Deploy
+
+Merges to `main` deploy through `.github/workflows/deploy.yml`. Pull requests
+run install, test, and build only; production credentials are only requested by
+the `production` environment deploy job after code has landed on `main`.
+
+Use GitHub OIDC with Google Workload Identity Federation instead of a long-lived
+service account JSON key. Configure these GitHub Environment variables on the
+`production` environment:
+
+| Variable | Value |
+| --- | --- |
+| `GCP_PROJECT_ID` | `tabula-md-prod` |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | Full Workload Identity Provider resource name. |
+| `GCP_SERVICE_ACCOUNT` | Deploy service account email. |
+| `TABULA_JSON_SMOKE_URL` | `https://json.tabula.md` |
+| `TABULA_JSON_SMOKE_ORIGIN` | `https://tabula.md` |
+
+The deploy service account should be scoped to this project and should only
+have the permissions needed to deploy the App Engine service and write/read the
+private snapshot bucket used by `app.yaml`.
+
 The service uses Google Application Default Credentials. On App Engine, grant
 the App Engine service account object read/write access to the private GCS
 bucket. For local production testing, use `gcloud auth application-default
