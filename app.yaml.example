@@ -10,9 +10,9 @@ automatic_scaling:
 
 env_variables:
   NODE_ENV: production
-  TABULA_JSON_ALLOWED_ORIGINS: "https://tabula.md,https://www.tabula.md"
+  TABULA_JSON_ALLOWED_ORIGINS: "https://app.example.com"
   TABULA_JSON_STORAGE_DRIVER: gcs
-  TABULA_JSON_GCS_BUCKET: tabula-json-prod
+  TABULA_JSON_GCS_BUCKET: your-private-snapshot-bucket
   TABULA_JSON_GCS_PREFIX: json/
   TABULA_JSON_MAX_PAYLOAD_BYTES: "2097152"
   TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE: "30"

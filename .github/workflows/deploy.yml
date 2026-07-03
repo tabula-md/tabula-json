@@ -17,10 +17,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -46,10 +46,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -59,6 +59,20 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Generate App Engine config
+        env:
+          TABULA_JSON_ALLOWED_ORIGINS: ${{ vars.TABULA_JSON_ALLOWED_ORIGINS }}
+          TABULA_JSON_GCS_BUCKET: ${{ vars.TABULA_JSON_GCS_BUCKET }}
+          TABULA_JSON_GCS_PREFIX: ${{ vars.TABULA_JSON_GCS_PREFIX }}
+          TABULA_JSON_GLOBAL_READ_RATE_LIMIT_PER_MINUTE: ${{ vars.TABULA_JSON_GLOBAL_READ_RATE_LIMIT_PER_MINUTE }}
+          TABULA_JSON_GLOBAL_WRITE_RATE_LIMIT_PER_MINUTE: ${{ vars.TABULA_JSON_GLOBAL_WRITE_RATE_LIMIT_PER_MINUTE }}
+          TABULA_JSON_MAX_INSTANCES: ${{ vars.TABULA_JSON_MAX_INSTANCES }}
+          TABULA_JSON_MAX_PAYLOAD_BYTES: ${{ vars.TABULA_JSON_MAX_PAYLOAD_BYTES }}
+          TABULA_JSON_READ_RATE_LIMIT_PER_MINUTE: ${{ vars.TABULA_JSON_READ_RATE_LIMIT_PER_MINUTE }}
+          TABULA_JSON_STORAGE_DRIVER: ${{ vars.TABULA_JSON_STORAGE_DRIVER }}
+          TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE: ${{ vars.TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE }}
+        run: node scripts/write-app-yaml.mjs
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
@@ -78,6 +92,6 @@ jobs:
           TABULA_JSON_SMOKE_ORIGIN: ${{ vars.TABULA_JSON_SMOKE_ORIGIN }}
           TABULA_JSON_SMOKE_URL: ${{ vars.TABULA_JSON_SMOKE_URL }}
         run: |
-          TABULA_JSON_SMOKE_ORIGIN="${TABULA_JSON_SMOKE_ORIGIN:-https://tabula.md}" \
-          TABULA_JSON_SMOKE_URL="${TABULA_JSON_SMOKE_URL:-https://json.tabula.md}" \
+          : "${TABULA_JSON_SMOKE_ORIGIN:?TABULA_JSON_SMOKE_ORIGIN is required}"
+          : "${TABULA_JSON_SMOKE_URL:?TABULA_JSON_SMOKE_URL is required}"
           npm run smoke:production
