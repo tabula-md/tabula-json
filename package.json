@@ -13,10 +13,11 @@
     "dev:watch": "tsx watch src/server.ts",
     "start": "node dist/src/server.js",
     "build": "tsc -p tsconfig.json",
-    "deploy": "npm run build && gcloud app deploy --project ${GOOGLE_CLOUD_PROJECT:-tabula-md-prod} -q",
+    "deploy": "npm run build && node scripts/write-app-yaml.mjs && node scripts/deploy-gcp.mjs",
     "deploy:gcp": "npm run deploy",
+    "surface:check": "node scripts/public-surface-check.mjs",
     "smoke:production": "node scripts/smoke-production.mjs",
-    "test": "vitest run",
+    "test": "vitest run && npm run surface:check",
     "test:watch": "vitest"
   },
   "dependencies": {

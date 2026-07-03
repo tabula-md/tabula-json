@@ -42,7 +42,7 @@ describe("GcsJsonShareStore", () => {
   it("writes encrypted snapshots as opaque objects with stable storage metadata", async () => {
     const { client, objects } = createTestClient();
     const store = new GcsJsonShareStore({
-      bucket: "tabula-json-prod",
+      bucket: "example-snapshot-bucket",
       client,
       prefix: "shares",
     });
@@ -50,7 +50,7 @@ describe("GcsJsonShareStore", () => {
 
     await store.writeJsonShare("abc12345", body);
 
-    expect(objects.get("tabula-json-prod/shares/abc12345.bin")).toMatchObject({
+    expect(objects.get("example-snapshot-bucket/shares/abc12345.bin")).toMatchObject({
       body,
       options: {
         metadata: {
@@ -66,7 +66,7 @@ describe("GcsJsonShareStore", () => {
   it("reads encrypted snapshots from the configured prefix", async () => {
     const { client } = createTestClient();
     const store = new GcsJsonShareStore({
-      bucket: "tabula-json-prod",
+      bucket: "example-snapshot-bucket",
       client,
       prefix: "/snapshots/",
     });
@@ -79,7 +79,7 @@ describe("GcsJsonShareStore", () => {
   it("returns null when Google Cloud Storage reports a missing object", async () => {
     const { client } = createTestClient();
     const store = new GcsJsonShareStore({
-      bucket: "tabula-json-prod",
+      bucket: "example-snapshot-bucket",
       client,
     });
 
