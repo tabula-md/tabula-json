@@ -3,4 +3,14 @@ dist/
 .env
 app.yaml
 .tabula-json/
+.codex/
+.linear/
+docs/
+knowledge/
+WORKFLOW.md
+AGENTS.md
+CLAUDE.md
+CONTRIBUTING.md
+SECURITY.md
 *.log
+.DS_Store
