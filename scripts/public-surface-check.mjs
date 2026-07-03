@@ -1,11 +1,20 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 
 const trackedFiles = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" })
   .split("\0")
   .filter(Boolean);
 
 const forbiddenPaths = new Map([
+  ["AGENTS.md", "local agent instructions do not belong in the public OSS repo"],
+  ["CLAUDE.md", "local agent instructions do not belong in the public OSS repo"],
+  ["WORKFLOW.md", "maintainer workflow belongs outside the public OSS repo"],
+  ["WORKFLOW.ko.md", "maintainer workflow belongs outside the public OSS repo"],
+  ["TODO.md", "maintainer planning notes belong outside the public OSS repo"],
+  ["TODO.ko.md", "maintainer planning notes belong outside the public OSS repo"],
+  ["CHANGELOG.md", "release notes should be published through GitHub Releases"],
+  ["CONTRIBUTING.md", "public contribution policy is not ready yet"],
+  ["SECURITY.md", "public security policy is not ready yet"],
   ["app.yaml", "generated provider config should not be tracked; use app.yaml.example"],
 ]);
 
@@ -31,6 +40,10 @@ const forbiddenText = [
 const errors = [];
 
 for (const file of trackedFiles) {
+  if (!existsSync(file)) {
+    continue;
+  }
+
   const forbiddenPathReason = forbiddenPaths.get(file);
   if (forbiddenPathReason) {
     errors.push(`${file}: ${forbiddenPathReason}`);

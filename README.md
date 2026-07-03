@@ -84,12 +84,12 @@ Run Tabula.md against a local JSON store with:
 VITE_TABULA_JSON_URL=http://localhost:3004 npm run dev
 ```
 
-## Deployment
+## Self-Hosting
 
-Run Tabula JSON Store as a Node service behind a TLS-capable edge. Use the
-storage driver that matches your deployment.
+Run Tabula JSON Store as a Node service behind a TLS-capable edge. The service
+can store encrypted blobs in object storage or on a local filesystem.
 
-Required production environment:
+Example object-storage configuration:
 
 ```env
 NODE_ENV=production
@@ -104,52 +104,8 @@ TABULA_JSON_GLOBAL_WRITE_RATE_LIMIT_PER_MINUTE=120
 TABULA_JSON_GLOBAL_READ_RATE_LIMIT_PER_MINUTE=3000
 ```
 
-Provider-specific project ids, bucket names, credentials, DNS, and rollout
-commands belong outside the public repository. This repository includes
-`app.yaml.example` and `scripts/write-app-yaml.mjs` so deploy automation can
-generate an App Engine config from environment variables without committing the
-managed service's concrete values.
-
-Manual App Engine deploys must set provider values through the environment:
-
-```sh
-export GOOGLE_CLOUD_PROJECT=<gcp-project-id>
-export TABULA_JSON_ALLOWED_ORIGINS=https://app.example.com
-export TABULA_JSON_GCS_BUCKET=<private-bucket-name>
-npm run deploy
-```
-
-### GitHub Actions Production Deploy
-
-Merges to `main` deploy through `.github/workflows/deploy.yml`. Pull requests
-run install, test, and build only; production credentials are only requested by
-the `production` environment deploy job after code has landed on `main`.
-
-Use GitHub OIDC with Google Workload Identity Federation instead of a long-lived
-service account JSON key. Configure these GitHub Environment variables on your
-`production` environment:
-
-- `GCP_PROJECT_ID`
-- `GCP_WORKLOAD_IDENTITY_PROVIDER`
-- `GCP_SERVICE_ACCOUNT`
-- `TABULA_JSON_ALLOWED_ORIGINS`
-- `TABULA_JSON_GCS_BUCKET`
-- `TABULA_JSON_GCS_PREFIX`
-- `TABULA_JSON_MAX_PAYLOAD_BYTES`
-- `TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE`
-- `TABULA_JSON_READ_RATE_LIMIT_PER_MINUTE`
-- `TABULA_JSON_GLOBAL_WRITE_RATE_LIMIT_PER_MINUTE`
-- `TABULA_JSON_GLOBAL_READ_RATE_LIMIT_PER_MINUTE`
-- `TABULA_JSON_SMOKE_URL`
-- `TABULA_JSON_SMOKE_ORIGIN`
-
-The deploy service account should only have the permissions needed to deploy
-the App Engine service and write/read the private snapshot bucket.
-
-The service uses Google Application Default Credentials. On App Engine, grant
-the App Engine service account object read/write access to the private GCS
-bucket. For local production testing, use `gcloud auth application-default
-login` or set `GOOGLE_APPLICATION_CREDENTIALS`.
+Provider-specific project ids, credentials, DNS, and rollout commands belong
+outside the public repository.
 
 ## Storage Drivers
 
@@ -180,6 +136,13 @@ The service applies per-instance IP and global rate limits for snapshot writes
 and reads. These are cost and abuse guardrails, not account-level product
 policy. For larger launches, add edge or load-balancer rate limiting before
 requests reach this service.
+
+## Validation
+
+```sh
+npm test
+npm run build
+```
 
 ## Backed By
 
