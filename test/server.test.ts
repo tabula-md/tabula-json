@@ -52,6 +52,7 @@ describe("Tabula JSON server", () => {
     expect(createResponse.body.id).toMatch(/^[A-Za-z0-9_-]{8,80}$/);
     expect(createResponse.body.data).toMatch(new RegExp(`/api/v2/${createResponse.body.id}$`));
     expect(createResponse.body.createdAt).toBeUndefined();
+    expect(createResponse.body.expiresAt).toMatch(/Z$/);
 
     await request(server.app)
       .get(`/api/v2/${createResponse.body.id}`)
@@ -59,10 +60,12 @@ describe("Tabula JSON server", () => {
       .buffer(true)
       .expect(200)
       .expect("content-type", /application\/octet-stream/)
-      .expect("cache-control", "public, max-age=31536000, immutable")
+      .expect("cache-control", "public, max-age=3600")
       .expect("x-content-type-options", "nosniff")
+      .expect("x-tabula-retention-days", "7")
       .expect((response) => {
         expect(response.body).toEqual(encryptedBlob);
+        expect(response.headers["x-tabula-expires-at"]).toMatch(/Z$/);
       });
   });
 
@@ -77,6 +80,7 @@ describe("Tabula JSON server", () => {
 
     expect(createResponse.body.data).toMatch(new RegExp(`/api/v1/${createResponse.body.id}$`));
     expect(createResponse.body.createdAt).toMatch(/Z$/);
+    expect(createResponse.body.expiresAt).toMatch(/Z$/);
 
     await request(server.app)
       .get(`/api/v1/${createResponse.body.id}`)
@@ -247,6 +251,31 @@ describe("Tabula JSON server", () => {
     await request(server.app).get("/api/v2/missing123").set("origin", "https://tabula.md").expect(404);
   });
 
+  it("returns 404 after the configured retention window", async () => {
+    const server = createTabulaJsonServer({
+      dataDir: temporaryDirectory,
+      allowedOrigins: ["https://tabula.md"],
+      retentionDays: 1,
+    });
+    const createResponse = await request(server.app)
+      .post("/api/v2/post/")
+      .set("origin", "https://tabula.md")
+      .set("content-type", "application/octet-stream")
+      .send(encryptedBlob)
+      .expect(200);
+    const snapshotPath = path.join(temporaryDirectory, "json", createResponse.body.id, "snapshot.bin");
+    const expiredAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+    await fs.utimes(snapshotPath, expiredAt, expiredAt);
+
+    await request(server.app)
+      .get(`/api/v2/${createResponse.body.id}`)
+      .set("origin", "https://tabula.md")
+      .expect(404)
+      .expect((response) => {
+        expect(response.body.error).toBe("JSON share not found or expired");
+      });
+  });
+
   it("keeps the write route strict", async () => {
     const server = createTabulaJsonServer({ dataDir: temporaryDirectory, allowedOrigins: ["https://tabula.md"] });
     await request(server.app)
@@ -290,5 +319,32 @@ describe("Tabula JSON server", () => {
         process.env.TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE = originalValue;
       }
     }
+  });
+
+  it("fails fast when retention is not a positive integer", () => {
+    const originalValue = process.env.TABULA_JSON_RETENTION_DAYS;
+    process.env.TABULA_JSON_RETENTION_DAYS = "0";
+
+    try {
+      expect(() =>
+        createTabulaJsonServer({ dataDir: temporaryDirectory, allowedOrigins: ["https://tabula.md"] }),
+      ).toThrow("TABULA_JSON_RETENTION_DAYS must be a positive integer.");
+    } finally {
+      if (originalValue === undefined) {
+        delete process.env.TABULA_JSON_RETENTION_DAYS;
+      } else {
+        process.env.TABULA_JSON_RETENTION_DAYS = originalValue;
+      }
+    }
+  });
+
+  it("fails fast when configured retention options are invalid", () => {
+    expect(() =>
+      createTabulaJsonServer({
+        dataDir: temporaryDirectory,
+        allowedOrigins: ["https://tabula.md"],
+        retentionDays: 0,
+      }),
+    ).toThrow("retentionDays must be a positive integer.");
   });
 });

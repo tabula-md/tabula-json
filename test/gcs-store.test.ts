@@ -4,6 +4,7 @@ import { GcsJsonShareStore } from "../src/storage/gcs-store.js";
 type SavedObject = {
   body: Buffer;
   options: unknown;
+  timeCreated: string;
 };
 
 function createTestClient() {
@@ -26,8 +27,17 @@ function createTestClient() {
             async exists() {
               return [objects.has(key)] as [boolean];
             },
+            async getMetadata() {
+              const object = objects.get(key);
+              if (!object) {
+                const error = new Error("missing") as Error & { code: number };
+                error.code = 404;
+                throw error;
+              }
+              return [{ timeCreated: object.timeCreated }, {}] as [{ timeCreated: string }, unknown];
+            },
             async save(data: Buffer, options: unknown) {
-              objects.set(key, { body: data, options });
+              objects.set(key, { body: data, options, timeCreated: new Date().toISOString() });
             },
           };
         },
@@ -54,7 +64,7 @@ describe("GcsJsonShareStore", () => {
       body,
       options: {
         metadata: {
-          cacheControl: "public, max-age=31536000, immutable",
+          cacheControl: "public, max-age=3600",
           contentType: "application/octet-stream",
         },
         resumable: false,
@@ -73,6 +83,7 @@ describe("GcsJsonShareStore", () => {
     await store.writeJsonShare("abc12345", Buffer.from([1, 2, 3]));
 
     await expect(store.getJsonShare("abc12345")).resolves.toEqual(Buffer.from([1, 2, 3]));
+    await expect(store.getJsonShareMetadata?.("abc12345")).resolves.toMatchObject({ createdAt: expect.any(Date) });
     await expect(store.hasJsonShare?.("abc12345")).resolves.toBe(true);
   });
 
@@ -84,6 +95,7 @@ describe("GcsJsonShareStore", () => {
     });
 
     await expect(store.getJsonShare("abc12345")).resolves.toBeNull();
+    await expect(store.getJsonShareMetadata?.("abc12345")).resolves.toBeNull();
     await expect(store.hasJsonShare?.("abc12345")).resolves.toBe(false);
   });
 });

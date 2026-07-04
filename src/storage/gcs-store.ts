@@ -1,10 +1,11 @@
 import { Storage } from "@google-cloud/storage";
 import { jsonShareCacheControl, jsonShareContentType, validateJsonShareId } from "../protocol.js";
-import type { JsonShareStore } from "./store.js";
+import type { JsonShareMetadata, JsonShareStore } from "./store.js";
 
 type GcsFile = {
   download: () => Promise<[Buffer]>;
   exists: () => Promise<[boolean]>;
+  getMetadata: () => Promise<[{ timeCreated?: string; updated?: string }, unknown]>;
   save: (
     data: Buffer,
     options: {
@@ -60,6 +61,20 @@ export class GcsJsonShareStore implements JsonShareStore {
     return exists;
   }
 
+  async getJsonShareMetadata(jsonIdInput: string): Promise<JsonShareMetadata | null> {
+    const jsonId = validateJsonShareId(jsonIdInput);
+    try {
+      const [metadata] = await this.getFile(jsonId).getMetadata();
+      const createdAt = parseGcsTimestamp(metadata.timeCreated ?? metadata.updated);
+      return createdAt ? { createdAt } : null;
+    } catch (error) {
+      if (isObjectNotFound(error)) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
   async writeJsonShare(jsonIdInput: string, snapshot: Buffer) {
     const jsonId = validateJsonShareId(jsonIdInput);
     await this.getFile(jsonId).save(snapshot, {
@@ -92,4 +107,12 @@ function isObjectNotFound(error: unknown) {
 
   const candidate = error as { code?: number | string };
   return candidate.code === 404 || candidate.code === "404";
+}
+
+function parseGcsTimestamp(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date : null;
 }

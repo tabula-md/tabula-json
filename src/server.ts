@@ -4,6 +4,7 @@ import http from "node:http";
 import path from "node:path";
 import express, { type RequestHandler } from "express";
 import {
+  defaultJsonShareRetentionDays,
   defaultMaxPayloadBytes,
   legacyJsonShareApiPrefix,
   legacyJsonSharePostPath,
@@ -27,6 +28,7 @@ type ServerOptions = {
   maxPayloadBytes?: number;
   port?: number;
   rateLimits?: Partial<RateLimitOptions>;
+  retentionDays?: number;
 };
 
 const defaultPort = 3004;
@@ -49,6 +51,11 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
   const allowedOrigins = options.allowedOrigins ?? parseAllowedOrigins(process.env.TABULA_JSON_ALLOWED_ORIGINS);
   const maxPayloadBytes =
     options.maxPayloadBytes ?? numberFromEnv("TABULA_JSON_MAX_PAYLOAD_BYTES", defaultMaxPayloadBytes);
+  const retentionDays = positiveInteger(
+    options.retentionDays ??
+      positiveIntegerFromEnv("TABULA_JSON_RETENTION_DAYS", defaultJsonShareRetentionDays),
+    "retentionDays",
+  );
   const rateLimits = resolveRateLimits(options.rateLimits);
 
   const store = createJsonShareStore({ dataDir });
@@ -100,16 +107,18 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
           }
           const snapshot = validateJsonShareBlob(request.body, { maxPayloadBytes });
           const jsonId = await generateUniqueJsonShareId(store);
-          const timestamp = new Date().toISOString();
+          const timestamp = new Date();
+          const expiresAt = jsonShareExpiresAt(timestamp, retentionDays).toISOString();
 
           await store.writeJsonShare(jsonId, snapshot);
 
-          const responseBody: { createdAt?: string; data: string; id: string } = {
+          const responseBody: { createdAt?: string; data: string; expiresAt: string; id: string } = {
             id: jsonId,
             data: `${getRequestOrigin(request)}${apiPrefix}${jsonId}`,
+            expiresAt,
           };
           if (includeCreatedAt) {
-            responseBody.createdAt = timestamp;
+            responseBody.createdAt = timestamp.toISOString();
           }
           response.status(statusCode).json(responseBody);
         } catch (error) {
@@ -129,17 +138,27 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
       async (request, response, next) => {
         try {
           const jsonId = validateJsonShareId(request.params.jsonId);
+          const metadata = store.getJsonShareMetadata ? await store.getJsonShareMetadata(jsonId) : null;
+          if (metadata && isJsonShareExpired(metadata.createdAt, retentionDays)) {
+            response.status(404).json({ error: "JSON share not found or expired" });
+            return;
+          }
           const snapshot = await store.getJsonShare(jsonId);
           if (!snapshot) {
             response.status(404).json({ error: "JSON share not found" });
             return;
           }
+          const expiresAt = metadata ? jsonShareExpiresAt(metadata.createdAt, retentionDays).toISOString() : null;
           response
             .status(200)
             .setHeader("Cache-Control", jsonShareCacheControl)
             .setHeader("X-Content-Type-Options", "nosniff")
-            .type(jsonShareContentType)
-            .send(snapshot);
+            .setHeader("X-Tabula-Retention-Days", String(retentionDays))
+            .type(jsonShareContentType);
+          if (expiresAt) {
+            response.setHeader("X-Tabula-Expires-At", expiresAt);
+          }
+          response.send(snapshot);
         } catch (error) {
           next(error);
         }
@@ -329,6 +348,25 @@ function numberFromEnv(name: string, fallback: number) {
     throw new Error(`${name} must be a non-negative number.`);
   }
   return parsed;
+}
+
+function positiveIntegerFromEnv(name: string, fallback: number) {
+  return positiveInteger(numberFromEnv(name, fallback), name);
+}
+
+function positiveInteger(value: number, name: string) {
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer.`);
+  }
+  return value;
+}
+
+function jsonShareExpiresAt(createdAt: Date, retentionDays: number) {
+  return new Date(createdAt.getTime() + retentionDays * 24 * 60 * 60 * 1000);
+}
+
+function isJsonShareExpired(createdAt: Date, retentionDays: number) {
+  return Date.now() >= jsonShareExpiresAt(createdAt, retentionDays).getTime();
 }
 
 function requiredEnv(name: string) {
