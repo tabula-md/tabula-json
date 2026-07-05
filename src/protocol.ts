@@ -5,8 +5,9 @@ export const jsonSharePostPath = "/api/v2/post/";
 export const legacyJsonShareApiPrefix = "/api/v1/";
 export const legacyJsonSharePostPath = "/api/v1/post/";
 export const jsonShareContentType = "application/octet-stream";
-export const jsonShareCacheControl = "public, max-age=31536000, immutable";
+export const jsonShareCacheControl = "public, max-age=3600";
 export const defaultMaxPayloadBytes = 2 * 1024 * 1024;
+export const defaultJsonShareRetentionDays = 7;
 
 export class ProtocolError extends Error {
   constructor(

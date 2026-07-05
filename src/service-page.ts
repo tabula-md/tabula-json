@@ -20,6 +20,7 @@ export function servicePageHtml() {
       <h1>Tabula JSON Store</h1>
       <p>Encrypted snapshot storage for <code>Tabula.md</code> share links.</p>
       <p>The server cannot decrypt stored snapshots.</p>
+      <p>Snapshots are retained for a limited window before they expire.</p>
       <p><a href="https://github.com/tabula-md/tabula-json" rel="noreferrer">Read more on GitHub</a>.</p>
     </main>
   </body>

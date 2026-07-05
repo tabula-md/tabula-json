@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { validateJsonShareId } from "../protocol.js";
-import type { JsonShareStore } from "./store.js";
+import type { JsonShareMetadata, JsonShareStore } from "./store.js";
 
 export class FileJsonShareStore implements JsonShareStore {
   constructor(private readonly dataDir: string) {}
@@ -24,6 +24,19 @@ export class FileJsonShareStore implements JsonShareStore {
     const jsonShareDir = this.jsonShareDir(jsonId);
     await fs.mkdir(jsonShareDir, { recursive: true });
     await writeFileAtomically(this.jsonSharePath(jsonId), snapshot);
+  }
+
+  async getJsonShareMetadata(jsonIdInput: string): Promise<JsonShareMetadata | null> {
+    const jsonId = validateJsonShareId(jsonIdInput);
+    try {
+      const stats = await fs.stat(this.jsonSharePath(jsonId));
+      return { createdAt: stats.mtime };
+    } catch (error) {
+      if (isNotFound(error)) {
+        return null;
+      }
+      throw error;
+    }
   }
 
   private jsonShareDir(jsonId: string) {

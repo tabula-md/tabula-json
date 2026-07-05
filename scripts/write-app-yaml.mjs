@@ -19,6 +19,14 @@ const yamlNumber = (name, fallback) => {
   }
   return String(value);
 };
+const yamlPositiveInteger = (name, fallback) => {
+  const rawValue = optionalEnv(name, fallback);
+  const value = Number(rawValue);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`${name} must be a positive integer`);
+  }
+  return String(value);
+};
 
 const config = {
   allowedOrigins: requiredEnv("TABULA_JSON_ALLOWED_ORIGINS"),
@@ -29,6 +37,7 @@ const config = {
   maxInstances: yamlNumber("TABULA_JSON_MAX_INSTANCES", "3"),
   maxPayloadBytes: yamlNumber("TABULA_JSON_MAX_PAYLOAD_BYTES", "2097152"),
   readRateLimit: yamlNumber("TABULA_JSON_READ_RATE_LIMIT_PER_MINUTE", "600"),
+  retentionDays: yamlPositiveInteger("TABULA_JSON_RETENTION_DAYS", "7"),
   storageDriver: optionalEnv("TABULA_JSON_STORAGE_DRIVER", "gcs"),
   writeRateLimit: yamlNumber("TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE", "30"),
 };
@@ -56,6 +65,7 @@ env_variables:
   TABULA_JSON_MAX_PAYLOAD_BYTES: ${yamlString(config.maxPayloadBytes)}
   TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE: ${yamlString(config.writeRateLimit)}
   TABULA_JSON_READ_RATE_LIMIT_PER_MINUTE: ${yamlString(config.readRateLimit)}
+  TABULA_JSON_RETENTION_DAYS: ${yamlString(config.retentionDays)}
   TABULA_JSON_GLOBAL_WRITE_RATE_LIMIT_PER_MINUTE: ${yamlString(config.globalWriteRateLimit)}
   TABULA_JSON_GLOBAL_READ_RATE_LIMIT_PER_MINUTE: ${yamlString(config.globalReadRateLimit)}
 `;
