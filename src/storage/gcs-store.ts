@@ -1,8 +1,9 @@
 import { Storage } from "@google-cloud/storage";
 import { jsonShareCacheControl, jsonShareContentType, validateJsonShareId } from "../protocol.js";
-import type { JsonShareMetadata, JsonShareStore } from "./store.js";
+import type { JsonShareListEntry, JsonShareMetadata, JsonShareStore } from "./store.js";
 
 type GcsFile = {
+  delete: (options?: { ignoreNotFound?: boolean }) => Promise<unknown>;
   download: () => Promise<[Buffer]>;
   exists: () => Promise<[boolean]>;
   getMetadata: () => Promise<[{ timeCreated?: string; updated?: string }, unknown]>;
@@ -19,8 +20,13 @@ type GcsFile = {
   ) => Promise<unknown>;
 };
 
+type GcsListedFile = GcsFile & {
+  name: string;
+};
+
 type GcsBucket = {
   file: (name: string) => GcsFile;
+  getFiles: (options: { prefix: string }) => Promise<[GcsListedFile[], ...unknown[]]>;
 };
 
 type GcsClient = {
@@ -40,6 +46,17 @@ export class GcsJsonShareStore implements JsonShareStore {
   constructor(options: GcsJsonShareStoreOptions) {
     this.bucket = (options.client ?? new Storage()).bucket(options.bucket);
     this.objectPrefix = normalizeObjectPrefix(options.prefix ?? "json/");
+  }
+
+  async deleteJsonShare(jsonIdInput: string) {
+    const jsonId = validateJsonShareId(jsonIdInput);
+    try {
+      await this.getFile(jsonId).delete({ ignoreNotFound: true });
+    } catch (error) {
+      if (!isObjectNotFound(error)) {
+        throw error;
+      }
+    }
   }
 
   async getJsonShare(jsonIdInput: string): Promise<Buffer | null> {
@@ -87,8 +104,47 @@ export class GcsJsonShareStore implements JsonShareStore {
     });
   }
 
+  async listJsonShares(): Promise<JsonShareListEntry[]> {
+    const [files] = await this.bucket.getFiles({ prefix: this.objectPrefix });
+    const entries: JsonShareListEntry[] = [];
+
+    for (const file of files) {
+      const jsonId = this.getJsonIdFromObjectName(file.name);
+      if (!jsonId) {
+        continue;
+      }
+
+      try {
+        const [metadata] = await file.getMetadata();
+        const createdAt = parseGcsTimestamp(metadata.timeCreated ?? metadata.updated);
+        if (createdAt) {
+          entries.push({ jsonId, createdAt });
+        }
+      } catch (error) {
+        if (!isObjectNotFound(error)) {
+          throw error;
+        }
+      }
+    }
+
+    return entries;
+  }
+
   private getFile(jsonId: string) {
     return this.bucket.file(`${this.objectPrefix}${jsonId}.bin`);
+  }
+
+  private getJsonIdFromObjectName(objectName: string) {
+    if (!objectName.startsWith(this.objectPrefix) || !objectName.endsWith(".bin")) {
+      return null;
+    }
+
+    const jsonId = objectName.slice(this.objectPrefix.length, -".bin".length);
+    try {
+      return validateJsonShareId(jsonId);
+    } catch {
+      return null;
+    }
   }
 }
 

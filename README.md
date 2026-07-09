@@ -136,8 +136,18 @@ TABULA_JSON_READ_RATE_LIMIT_PER_MINUTE=600
 
 Share links are intended for handoff, not permanent publishing. The default
 retention window is 7 days. Set `TABULA_JSON_RETENTION_DAYS` to choose a
-different window, and configure the backing object store lifecycle to delete
-objects after the same period.
+different window.
+
+Expired snapshots are not served. On read, expired snapshots are removed from
+the backing store when the configured storage driver supports deletion. Operators
+can also run periodic cleanup with:
+
+```sh
+npm run cleanup:expired
+```
+
+For object stores, a matching bucket lifecycle policy is still recommended as a
+second cleanup guardrail.
 
 The service applies per-instance IP and global rate limits for snapshot writes
 and reads. These are cost and abuse guardrails, not account-level product
