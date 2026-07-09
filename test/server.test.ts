@@ -274,6 +274,7 @@ describe("Tabula JSON server", () => {
       .expect((response) => {
         expect(response.body.error).toBe("JSON share not found or expired");
       });
+    await expect(fs.stat(snapshotPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("keeps the write route strict", async () => {

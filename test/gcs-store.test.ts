@@ -24,6 +24,9 @@ function createTestClient() {
               }
               return [object.body] as [Buffer];
             },
+            async delete() {
+              objects.delete(key);
+            },
             async exists() {
               return [objects.has(key)] as [boolean];
             },
@@ -40,6 +43,17 @@ function createTestClient() {
               objects.set(key, { body: data, options, timeCreated: new Date().toISOString() });
             },
           };
+        },
+        async getFiles({ prefix }: { prefix: string }) {
+          return [
+            Array.from(objects.entries())
+              .filter(([key]) => key.startsWith(`${bucketName}/${prefix}`))
+              .map(([key]) => {
+                const name = key.slice(`${bucketName}/`.length);
+                const file = this.file(name);
+                return { ...file, name };
+              }),
+          ] as [Array<ReturnType<typeof this.file> & { name: string }>];
         },
       };
     },
@@ -97,5 +111,33 @@ describe("GcsJsonShareStore", () => {
     await expect(store.getJsonShare("abc12345")).resolves.toBeNull();
     await expect(store.getJsonShareMetadata?.("abc12345")).resolves.toBeNull();
     await expect(store.hasJsonShare?.("abc12345")).resolves.toBe(false);
+  });
+
+  it("lists and deletes encrypted snapshots from the configured prefix", async () => {
+    const { client, objects } = createTestClient();
+    const store = new GcsJsonShareStore({
+      bucket: "example-snapshot-bucket",
+      client,
+      prefix: "shares",
+    });
+    await store.writeJsonShare("abc12345", Buffer.from("one"));
+    await store.writeJsonShare("def67890", Buffer.from("two"));
+    objects.set("example-snapshot-bucket/shares/not-a-json-id.txt", {
+      body: Buffer.from("ignored"),
+      options: {},
+      timeCreated: new Date().toISOString(),
+    });
+
+    await expect(store.listJsonShares?.()).resolves.toEqual(
+      expect.arrayContaining([
+        { jsonId: "abc12345", createdAt: expect.any(Date) },
+        { jsonId: "def67890", createdAt: expect.any(Date) },
+      ]),
+    );
+
+    await store.deleteJsonShare?.("abc12345");
+
+    expect(objects.has("example-snapshot-bucket/shares/abc12345.bin")).toBe(false);
+    expect(objects.has("example-snapshot-bucket/shares/def67890.bin")).toBe(true);
   });
 });

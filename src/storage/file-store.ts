@@ -1,11 +1,17 @@
 import { randomUUID } from "node:crypto";
+import type { Dirent } from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { validateJsonShareId } from "../protocol.js";
-import type { JsonShareMetadata, JsonShareStore } from "./store.js";
+import type { JsonShareListEntry, JsonShareMetadata, JsonShareStore } from "./store.js";
 
 export class FileJsonShareStore implements JsonShareStore {
   constructor(private readonly dataDir: string) {}
+
+  async deleteJsonShare(jsonIdInput: string) {
+    const jsonId = validateJsonShareId(jsonIdInput);
+    await fs.rm(this.jsonShareDir(jsonId), { force: true, recursive: true });
+  }
 
   async getJsonShare(jsonIdInput: string): Promise<Buffer | null> {
     const jsonId = validateJsonShareId(jsonIdInput);
@@ -37,6 +43,40 @@ export class FileJsonShareStore implements JsonShareStore {
       }
       throw error;
     }
+  }
+
+  async listJsonShares(): Promise<JsonShareListEntry[]> {
+    const root = path.resolve(this.dataDir, "json");
+    let entries: Dirent[];
+    try {
+      entries = await fs.readdir(root, { withFileTypes: true });
+    } catch (error) {
+      if (isNotFound(error)) {
+        return [];
+      }
+      throw error;
+    }
+
+    const snapshots: JsonShareListEntry[] = [];
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      let jsonId: string;
+      try {
+        jsonId = validateJsonShareId(entry.name);
+      } catch {
+        continue;
+      }
+
+      const metadata = await this.getJsonShareMetadata(jsonId);
+      if (metadata) {
+        snapshots.push({ jsonId, ...metadata });
+      }
+    }
+
+    return snapshots;
   }
 
   private jsonShareDir(jsonId: string) {

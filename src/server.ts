@@ -20,6 +20,7 @@ import { createRateLimiter, RateLimitError, type RateLimiter } from "./rate-limi
 import { servicePageHtml } from "./service-page.js";
 import { FileJsonShareStore } from "./storage/file-store.js";
 import { GcsJsonShareStore } from "./storage/gcs-store.js";
+import { isJsonShareExpired, jsonShareExpiresAt } from "./storage/retention.js";
 import type { JsonShareStore } from "./storage/store.js";
 
 type ServerOptions = {
@@ -140,6 +141,7 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
           const jsonId = validateJsonShareId(request.params.jsonId);
           const metadata = store.getJsonShareMetadata ? await store.getJsonShareMetadata(jsonId) : null;
           if (metadata && isJsonShareExpired(metadata.createdAt, retentionDays)) {
+            await store.deleteJsonShare?.(jsonId).catch(() => undefined);
             response.status(404).json({ error: "JSON share not found or expired" });
             return;
           }
@@ -359,14 +361,6 @@ function positiveInteger(value: number, name: string) {
     throw new Error(`${name} must be a positive integer.`);
   }
   return value;
-}
-
-function jsonShareExpiresAt(createdAt: Date, retentionDays: number) {
-  return new Date(createdAt.getTime() + retentionDays * 24 * 60 * 60 * 1000);
-}
-
-function isJsonShareExpired(createdAt: Date, retentionDays: number) {
-  return Date.now() >= jsonShareExpiresAt(createdAt, retentionDays).getTime();
 }
 
 function requiredEnv(name: string) {
