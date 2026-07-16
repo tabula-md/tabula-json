@@ -18,14 +18,19 @@ afterEach(async () => {
 describe("Tabula JSON server", () => {
   const encryptedBlob = Buffer.from("opaque encrypted snapshot", "utf8");
 
-  it("serves a minimal public service page", async () => {
+  it("serves public service metadata", async () => {
     const server = createTabulaJsonServer({ dataDir: temporaryDirectory, allowedOrigins: ["https://tabula.md"] });
     await request(server.app)
       .get("/")
       .expect(200)
       .expect("access-control-allow-origin", "*")
       .expect((response) => {
-        expect(response.text).toContain("Tabula JSON Store");
+        expect(response.body).toMatchObject({
+          ok: true,
+          service: "tabula-json",
+          description: "Encrypted snapshot storage for Tabula.md share links.",
+          health: "/health",
+        });
       });
   });
 

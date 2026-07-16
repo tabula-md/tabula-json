@@ -1,4 +1,10 @@
-# Tabula JSON Store
+<p align="center">
+  <a href="https://tabula.md">
+    <img src="https://tabula.md/favicon.svg" alt="Tabula.md" width="56" />
+  </a>
+</p>
+
+# Tabula.md JSON
 
 Encrypted snapshot storage for [Tabula.md](https://tabula.md) share links.
 
@@ -15,7 +21,7 @@ The Tabula.md browser client serializes and encrypts a workspace snapshot before
 uploading it. The decryption key stays after `#` in the Tabula.md URL and is
 not sent to this service.
 
-Tabula JSON Store is not the live collaboration server. `tabula-room` relays
+Tabula.md JSON is not the live collaboration server. `tabula-room` relays
 real-time editing updates; `tabula-json` stores encrypted snapshots that can be
 opened later through the replace/import flow.
 
@@ -89,7 +95,7 @@ VITE_TABULA_JSON_URL=http://localhost:3004 npm run dev
 
 ## Self-Hosting
 
-Run Tabula JSON Store as a Node service behind a TLS-capable edge. The service
+Run Tabula.md JSON as a Node service behind a TLS-capable edge. The service
 can store encrypted blobs in object storage or on a local filesystem.
 
 Example object-storage configuration:
@@ -163,7 +169,7 @@ npm run build
 
 ## Backed By
 
-Tabula JSON Store is backed by
+Tabula.md JSON is backed by
 [Marker Inc Korea](https://github.com/Marker-Inc-Korea).
 
 ## License
