@@ -8,161 +8,60 @@
 
 Encrypted snapshot storage for [Tabula.md](https://tabula.md) share links.
 
-Service: [json.tabula.md](https://json.tabula.md) · Source:
-[tabula-md/tabula-json](https://github.com/tabula-md/tabula-json)
+> This repository is for operators who self-host Tabula.md infrastructure. You
+> do not need to run it to use Tabula.md.
 
-This service stores encrypted snapshot blobs for links like:
+Tabula.md JSON stores encrypted `#json` snapshots for later import. The browser
+encrypts a workspace before upload; the decryption key stays in the URL fragment
+and never reaches this service. It is not the live collaboration server.
 
-```text
-https://tabula.md/#json=<jsonId>,<decryptionKey>
+## Self-host
+
+Run the service behind a TLS-capable edge with either Google Cloud Storage or a
+local filesystem driver:
+
+```sh
+npm ci
+npm run build
+
+TABULA_JSON_ALLOWED_ORIGINS=https://app.example.com \
+TABULA_JSON_STORAGE_DRIVER=file \
+TABULA_JSON_DATA_DIR=/data \
+PORT=3004 \
+npm start
 ```
 
-The Tabula.md browser client serializes and encrypts a workspace snapshot before
-uploading it. The decryption key stays after `#` in the Tabula.md URL and is
-not sent to this service.
+Point a Tabula.md app checkout at the service:
 
-Tabula.md JSON is not the live collaboration server. `tabula-room` relays
-real-time editing updates; `tabula-json` stores encrypted snapshots that can be
-opened later through the replace/import flow.
-
-## Protocol
-
-### `POST /api/v2/post/`
-
-Stores an encrypted snapshot.
-
-Write requests are CORS-limited to `TABULA_JSON_ALLOWED_ORIGINS`.
-Snapshots expire after the configured retention window. The default is 7 days.
-
-Request:
-
-```http
-POST /api/v2/post/
-Content-Type: application/octet-stream
-
-<opaque encrypted bytes>
+```sh
+VITE_TABULA_JSON_URL=https://json.example.com npm run dev
 ```
 
-Response:
+See `.env.example` for payload, retention, rate-limit, and object-storage
+configuration.
 
-```json
-{
-  "id": "generated-id",
-  "data": "https://json.tabula.md/api/v2/generated-id",
-  "expiresAt": "2026-10-01T00:00:00.000Z"
-}
-```
+## Retention
 
-### `GET /api/v2/:id`
+Snapshots are for handoff, not permanent publishing. They expire after seven
+days by default; set `TABULA_JSON_RETENTION_DAYS` for a different window.
+Expired snapshots are not served. Run `npm run cleanup:expired` periodically for
+storage drivers that support deletion, and set matching lifecycle rules in an
+object store.
 
-Returns the stored encrypted snapshot bytes.
+## Operations
 
-Read requests are public because stored records are ciphertext. The decryption
-key stays in the `#json` fragment on `tabula.md` and is never sent to this
-service.
+- `GET /` reports service metadata and the health-check path.
+- `GET /health` reports service health and version.
 
-```http
-HTTP/1.1 200 OK
-Content-Type: application/octet-stream
-
-<opaque encrypted bytes>
-```
-
-If the id does not exist, the service returns `404`.
-Expired snapshots also return `404`.
-
-### `GET /health`
-
-Returns service health.
-
-`/api/v1/post/` and `/api/v1/:id` remain available as compatibility aliases for
-older Tabula.md clients.
+The snapshot HTTP routes are a compatibility contract for the Tabula.md client,
+not a supported third-party publishing API.
 
 ## Development
 
 ```sh
 npm install
 npm run dev
-```
 
-The development server listens on `http://localhost:3004` by default.
-
-Run Tabula.md against a local JSON store with:
-
-```sh
-VITE_TABULA_JSON_URL=http://localhost:3004 npm run dev
-```
-
-## Self-Hosting
-
-Run Tabula.md JSON as a Node service behind a TLS-capable edge. The service
-can store encrypted blobs in object storage or on a local filesystem.
-
-Example object-storage configuration:
-
-```env
-NODE_ENV=production
-TABULA_JSON_ALLOWED_ORIGINS=https://app.example.com
-TABULA_JSON_STORAGE_DRIVER=gcs
-TABULA_JSON_GCS_BUCKET=your-private-snapshot-bucket
-TABULA_JSON_GCS_PREFIX=json/
-TABULA_JSON_MAX_PAYLOAD_BYTES=2097152
-TABULA_JSON_RETENTION_DAYS=7
-TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE=30
-TABULA_JSON_READ_RATE_LIMIT_PER_MINUTE=600
-TABULA_JSON_GLOBAL_WRITE_RATE_LIMIT_PER_MINUTE=120
-TABULA_JSON_GLOBAL_READ_RATE_LIMIT_PER_MINUTE=3000
-```
-
-Provider-specific project ids, credentials, DNS, and rollout commands belong
-outside the public repository.
-
-## Storage Drivers
-
-`TABULA_JSON_STORAGE_DRIVER` is required outside development.
-
-- `gcs`: stores records in Google Cloud Storage.
-- `file`: stores records under `TABULA_JSON_DATA_DIR` for local or simple
-  self-hosted deployments.
-
-Example self-hosted file configuration:
-
-```env
-PORT=3004
-TABULA_JSON_ALLOWED_ORIGINS=https://tabula.md
-TABULA_JSON_STORAGE_DRIVER=file
-TABULA_JSON_DATA_DIR=/data
-TABULA_JSON_MAX_PAYLOAD_BYTES=2097152
-TABULA_JSON_RETENTION_DAYS=7
-TABULA_JSON_WRITE_RATE_LIMIT_PER_MINUTE=30
-TABULA_JSON_READ_RATE_LIMIT_PER_MINUTE=600
-```
-
-## Retention and Abuse Controls
-
-Share links are intended for handoff, not permanent publishing. The default
-retention window is 7 days. Set `TABULA_JSON_RETENTION_DAYS` to choose a
-different window.
-
-Expired snapshots are not served. On read, expired snapshots are removed from
-the backing store when the configured storage driver supports deletion. Operators
-can also run periodic cleanup with:
-
-```sh
-npm run cleanup:expired
-```
-
-For object stores, a matching bucket lifecycle policy is still recommended as a
-second cleanup guardrail.
-
-The service applies per-instance IP and global rate limits for snapshot writes
-and reads. These are cost and abuse guardrails, not account-level product
-policy. For larger launches, add edge or load-balancer rate limiting before
-requests reach this service.
-
-## Validation
-
-```sh
 npm test
 npm run build
 ```
