@@ -17,7 +17,6 @@ import {
   validateJsonShareBlob,
 } from "./protocol.js";
 import { createRateLimiter, RateLimitError, type RateLimiter } from "./rate-limit.js";
-import { servicePageHtml } from "./service-page.js";
 import { FileJsonShareStore } from "./storage/file-store.js";
 import { GcsJsonShareStore } from "./storage/gcs-store.js";
 import { isJsonShareExpired, jsonShareExpiresAt } from "./storage/retention.js";
@@ -69,7 +68,13 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
   app.enable("strict routing");
 
   app.get("/", applyOpenCors(), (_request, response) => {
-    response.status(200).type("html").send(servicePageHtml());
+    response.json({
+      ok: true,
+      service: "tabula-json",
+      description: "Encrypted snapshot storage for Tabula.md share links.",
+      health: "/health",
+      version: serviceVersion,
+    });
   });
 
   app.get("/health", applyOpenCors(), (_request, response) => {
