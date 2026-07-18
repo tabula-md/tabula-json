@@ -71,7 +71,7 @@ export function createTabulaJsonServer(options: ServerOptions = {}) {
     response.json({
       ok: true,
       service: "tabula-json",
-      description: "Encrypted snapshot storage for Tabula.md share links.",
+      description: "Encrypted snapshot storage for Tabula.md Export links.",
       health: "/health",
       version: serviceVersion,
     });

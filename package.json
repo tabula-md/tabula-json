@@ -1,7 +1,7 @@
 {
   "name": "tabula-json",
   "version": "0.1.0",
-  "description": "Encrypted snapshot storage service for Tabula.md share links.",
+  "description": "Encrypted snapshot storage for Tabula.md Export links.",
   "license": "MIT",
   "type": "module",
   "main": "dist/src/server.js",

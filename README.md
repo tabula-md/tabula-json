@@ -6,7 +6,7 @@
 
 # Tabula.md JSON
 
-Encrypted snapshot storage for [Tabula.md](https://tabula.md) share links.
+Encrypted snapshot storage for [Tabula.md](https://tabula.md) Export links.
 
 > This repository is for operators who self-host Tabula.md infrastructure. You
 > do not need to run it to use Tabula.md.
