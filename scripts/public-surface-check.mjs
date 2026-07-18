@@ -5,15 +5,22 @@ const trackedFiles = execFileSync("git", ["ls-files", "-z"], { encoding: "utf8" 
   .split("\0")
   .filter(Boolean);
 
+const errors = [];
+const contributorContractPaths = ["AGENTS.md", "CONTRIBUTING.md"];
+
+for (const contractPath of contributorContractPaths) {
+  if (!existsSync(contractPath)) {
+    errors.push(`${contractPath}: public contributor contract is missing`);
+  }
+}
+
 const forbiddenPaths = new Map([
-  ["AGENTS.md", "local agent instructions do not belong in the public OSS repo"],
   ["CLAUDE.md", "local agent instructions do not belong in the public OSS repo"],
   ["WORKFLOW.md", "maintainer workflow belongs outside the public OSS repo"],
   ["WORKFLOW.ko.md", "maintainer workflow belongs outside the public OSS repo"],
   ["TODO.md", "maintainer planning notes belong outside the public OSS repo"],
   ["TODO.ko.md", "maintainer planning notes belong outside the public OSS repo"],
   ["CHANGELOG.md", "release notes should be published through GitHub Releases"],
-  ["CONTRIBUTING.md", "public contribution policy is not ready yet"],
   ["app.yaml", "generated provider config should not be tracked; use app.yaml.example"],
 ]);
 
@@ -35,8 +42,6 @@ const forbiddenText = [
     pattern: new RegExp(`GOOGLE_CLOUD_PROJECT=${managedProject}`, "g"),
   },
 ];
-
-const errors = [];
 
 for (const file of trackedFiles) {
   if (!existsSync(file)) {
