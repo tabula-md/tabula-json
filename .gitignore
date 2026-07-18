@@ -8,8 +8,6 @@ app.yaml
 docs/
 knowledge/
 WORKFLOW.md
-AGENTS.md
 CLAUDE.md
-CONTRIBUTING.md
 *.log
 .DS_Store
