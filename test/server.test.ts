@@ -28,7 +28,7 @@ describe("Tabula JSON server", () => {
         expect(response.body).toMatchObject({
           ok: true,
           service: "tabula-json",
-          description: "Encrypted snapshot storage for Tabula.md share links.",
+          description: "Encrypted snapshot storage for Tabula.md Export links.",
           health: "/health",
         });
       });
